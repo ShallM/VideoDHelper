@@ -1,0 +1,1946 @@
+{
+  "method": "由开发助手对照冻结原稿和两版输出审阅。67项检查用于定位主题与检查关键限定；不是独立盲评或通用准确率。未发现这67项中的整项主题完全缺失，但局部遗漏、错误和限定不足仍存在。",
+  "referenceFormat": "structuredClaims的cX.Y表示最终notes.json第X个章节的第Y条claims，均从0开始。legacyCandidates由来源重叠和关键词选出，只作定位，不是自动语义评分。",
+  "topics": [
+    {
+      "id": "short-01",
+      "requirement": "Kimi预告与当天是否发布的不确定性",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.0"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 0
+        },
+        {
+          "chapterIndex": 1
+        },
+        {
+          "chapterIndex": 2
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-02",
+      "requirement": "Canva排名第二、先规划后渲染",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.2"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 2
+        },
+        {
+          "chapterIndex": 3
+        },
+        {
+          "chapterIndex": 4
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-03",
+      "requirement": "Vector 1.0生成可编辑SVG",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.3"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 3
+        },
+        {
+          "chapterIndex": 2
+        },
+        {
+          "chapterIndex": 4
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-04",
+      "requirement": "营销工具读取画面旁白文字并生成300+属性",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.4"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 4
+        },
+        {
+          "chapterIndex": 10
+        },
+        {
+          "chapterIndex": 2
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-05",
+      "requirement": "封号是用户个案，地区政策回复与不可撤销",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c1.0"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 5
+        },
+        {
+          "chapterIndex": 12
+        },
+        {
+          "chapterIndex": 13
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-06",
+      "requirement": "Skills捐赠、70多个平台与开放贡献",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c1.1"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 6
+        },
+        {
+          "chapterIndex": 7
+        },
+        {
+          "chapterIndex": 5
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-07",
+      "requirement": "驻留研究8至12周、数据权利归研究者",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c1.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 9
+        },
+        {
+          "chapterIndex": 0
+        },
+        {
+          "chapterIndex": 6
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-08",
+      "requirement": "形式验证超过100个库，保留消息归属",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c1.6"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 10
+        },
+        {
+          "chapterIndex": 17
+        },
+        {
+          "chapterIndex": 8
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "两版正文保留机构、规模和验证用途，但消息归属不处处显式，不能当独立核实。",
+      "affectedStrategy": "both"
+    },
+    {
+      "id": "short-09",
+      "requirement": "Decisions API有界决策用途及与Responses的十倍比较",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c2.0"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 11
+        },
+        {
+          "chapterIndex": 8
+        },
+        {
+          "chapterIndex": 9
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-10",
+      "requirement": "同一API最多400问、每百万输入0.10美元、缓存0.01美元且无输出费",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c2.1"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 11
+        },
+        {
+          "chapterIndex": 5
+        },
+        {
+          "chapterIndex": 12
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-11",
+      "requirement": "监控漏洞和潜在操作权限风险",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c2.2"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 12
+        },
+        {
+          "chapterIndex": 13
+        },
+        {
+          "chapterIndex": 14
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-12",
+      "requirement": "HUD先试一个任务再购买并允许匿名",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c2.4"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 14
+        },
+        {
+          "chapterIndex": 13
+        },
+        {
+          "chapterIndex": 15
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-13",
+      "requirement": "诊断1.7倍是宣布/视频转述而非独立验证",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c3.0"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 15
+        },
+        {
+          "chapterIndex": 13
+        },
+        {
+          "chapterIndex": 0
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-14",
+      "requirement": "巴克莱裁员5000、5%、上半年1000的报道归属",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c3.2"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 17
+        },
+        {
+          "chapterIndex": 16
+        },
+        {
+          "chapterIndex": 18
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "short-15",
+      "requirement": "两组开源模型总参数与激活参数不能混淆",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c3.4"
+        },
+        {
+          "claim": "c3.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 19
+        },
+        {
+          "chapterIndex": 20
+        },
+        {
+          "chapterIndex": 6
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-01",
+      "requirement": "正史缺传与生卒年为通行说法",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.1"
+        },
+        {
+          "claim": "c0.2"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 62
+        },
+        {
+          "chapterIndex": 0
+        },
+        {
+          "chapterIndex": 1
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-02",
+      "requirement": "东汉瘟疫背景与建安七子四人死亡",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.4"
+        },
+        {
+          "claim": "c0.5"
+        },
+        {
+          "claim": "c0.6"
+        },
+        {
+          "claim": "c11.15"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 4
+        },
+        {
+          "chapterIndex": 39
+        },
+        {
+          "chapterIndex": 124
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "新版前文为不到一百年十次，末尾一条却写成“大疫十年十次”，同句又给119到217年；存在局部数字措辞冲突。",
+      "affectedStrategy": "structured"
+    },
+    {
+      "id": "history-03",
+      "requirement": "宗族200余人、十年死2/3、死者七成伤寒",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.7"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 5
+        },
+        {
+          "chapterIndex": 42
+        },
+        {
+          "chapterIndex": 104
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-04",
+      "requirement": "伤寒在视频语境是发热急性传染病的泛称",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.8"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 5
+        },
+        {
+          "chapterIndex": 4
+        },
+        {
+          "chapterIndex": 3
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-05",
+      "requirement": "张伯祖师承、随诊实践及勤求古训广采众方",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c1.1"
+        },
+        {
+          "claim": "c1.3"
+        },
+        {
+          "claim": "c4.2"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 12
+        },
+        {
+          "chapterIndex": 10
+        },
+        {
+          "chapterIndex": 14
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-06",
+      "requirement": "王仲宣故事同时保留史书时间冲突和争议",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c2.4"
+        },
+        {
+          "claim": "c2.6"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 21
+        },
+        {
+          "chapterIndex": 20
+        },
+        {
+          "chapterIndex": 23
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-07",
+      "requirement": "长沙任职有争议，坐堂行医为传说",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c3.0"
+        },
+        {
+          "claim": "c3.1"
+        },
+        {
+          "claim": "c7.4"
+        },
+        {
+          "claim": "c11.7"
+        },
+        {
+          "claim": "c11.8"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 26
+        },
+        {
+          "chapterIndex": 28
+        },
+        {
+          "chapterIndex": 118
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-08",
+      "requirement": "成书年代更正，不把206年前后开始写十几年作为事实",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c4.1"
+        },
+        {
+          "claim": "c11.3"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 116
+        },
+        {
+          "chapterIndex": 40
+        },
+        {
+          "chapterIndex": 41
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-09",
+      "requirement": "原书16卷、王叔和整理伤寒部分10卷、杂病后被整理",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c4.2"
+        },
+        {
+          "claim": "c6.3"
+        },
+        {
+          "claim": "c11.15"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 125
+        },
+        {
+          "chapterIndex": 63
+        },
+        {
+          "chapterIndex": 41
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "旧版保留“识卷”等识别字，十卷关系不够清楚；新版流传史集中，正文仍有原字与规范书名混用。",
+      "affectedStrategy": "legacy"
+    },
+    {
+      "id": "history-10",
+      "requirement": "辨证论治：同病不同证，六经不是六个器官",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c4.5"
+        },
+        {
+          "claim": "c4.6"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 45
+        },
+        {
+          "chapterIndex": 46
+        },
+        {
+          "chapterIndex": 27
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-11",
+      "requirement": "六经框架包括三阳三阴，表述自足",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c4.6"
+        },
+        {
+          "claim": "c4.7"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 47
+        },
+        {
+          "chapterIndex": 46
+        },
+        {
+          "chapterIndex": 87
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-12",
+      "requirement": "两部分分别113方和205方",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c4.9"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 49
+        },
+        {
+          "chapterIndex": 116
+        },
+        {
+          "chapterIndex": 47
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-13",
+      "requirement": "冬至饺子等故事为传说，真实性难考证",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c5.0"
+        },
+        {
+          "claim": "c5.6"
+        },
+        {
+          "claim": "c11.8"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 58
+        },
+        {
+          "chapterIndex": 59
+        },
+        {
+          "chapterIndex": 119
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-14",
+      "requirement": "王洙发现残本、林亿等校定后分为两部书",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c6.4"
+        },
+        {
+          "claim": "c6.5"
+        },
+        {
+          "claim": "c6.7"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 63
+        },
+        {
+          "chapterIndex": 125
+        },
+        {
+          "chapterIndex": 123
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-15",
+      "requirement": "碑上330年字样不等于断言墓碑刻于330年",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c7.3"
+        },
+        {
+          "claim": "c11.10"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 120
+        },
+        {
+          "chapterIndex": 70
+        },
+        {
+          "chapterIndex": 118
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "旧版一条断言刻于330年；新版断言并非刻于330年。无标点原稿的否定范围仍有歧义，两版都不能视为可靠消歧。",
+      "affectedStrategy": "both"
+    },
+    {
+      "id": "history-16",
+      "requirement": "华佗活人书说法是后世附会且有质疑",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c8.0"
+        },
+        {
+          "claim": "c11.6"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 77
+        },
+        {
+          "chapterIndex": 118
+        },
+        {
+          "chapterIndex": 76
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-17",
+      "requirement": "附子久煎等为后世经验，不能冒称原书原文",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c8.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 85
+        },
+        {
+          "chapterIndex": 123
+        },
+        {
+          "chapterIndex": 0
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-18",
+      "requirement": "八纲由后世归纳，原书未明确写出八字",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c8.6"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 87
+        },
+        {
+          "chapterIndex": 86
+        },
+        {
+          "chapterIndex": 90
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-19",
+      "requirement": "治未病和疾病传变思想",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c9.0"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 94
+        },
+        {
+          "chapterIndex": 95
+        },
+        {
+          "chapterIndex": 15
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-20",
+      "requirement": "医德与术业：心正、术精及有疑需考证",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c10.3"
+        },
+        {
+          "claim": "c10.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 109
+        },
+        {
+          "chapterIndex": 10
+        },
+        {
+          "chapterIndex": 108
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-21",
+      "requirement": "曹操卒年更正为220年而非219年",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c6.2"
+        },
+        {
+          "claim": "c11.2"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 115
+        },
+        {
+          "chapterIndex": 2
+        },
+        {
+          "chapterIndex": 4
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "旧版更正章保留“二八二十年”等识别结果；新版将建安二十五年/220年和前文错误关联得更清楚。",
+      "affectedStrategy": "legacy"
+    },
+    {
+      "id": "history-22",
+      "requirement": "方药校订明确指出修改而非照抄前文配方",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c3.4"
+        },
+        {
+          "claim": "c3.5"
+        },
+        {
+          "claim": "c8.2"
+        },
+        {
+          "claim": "c11.4"
+        },
+        {
+          "claim": "c11.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 117
+        },
+        {
+          "chapterIndex": 34
+        },
+        {
+          "chapterIndex": 36
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-23",
+      "requirement": "欧洲黑死病用中国疗法因无史据被删除",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c11.11"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 121
+        },
+        {
+          "chapterIndex": 123
+        },
+        {
+          "chapterIndex": 1
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "history-24",
+      "requirement": "父亲名字晚出材料，作者删除而非当确定事实",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c11.9"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 119
+        },
+        {
+          "chapterIndex": 121
+        },
+        {
+          "chapterIndex": 40
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "旧版提及父名晚出，但未明确保留作者“删去其名”的决定；新版明确记载删除。",
+      "affectedStrategy": "legacy"
+    },
+    {
+      "id": "technical-01",
+      "requirement": "八位作者随机排序、同等贡献及明确分工",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.3"
+        },
+        {
+          "claim": "c0.4"
+        },
+        {
+          "claim": "c0.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 3
+        },
+        {
+          "chapterIndex": 2
+        },
+        {
+          "chapterIndex": 9
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-02",
+      "requirement": "以翻译为原始任务，替换循环卷积并保留并行优势",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.6"
+        },
+        {
+          "claim": "c0.11"
+        },
+        {
+          "claim": "c0.12"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 8
+        },
+        {
+          "chapterIndex": 9
+        },
+        {
+          "chapterIndex": 5
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-03",
+      "requirement": "28.4 BLEU及8GPU训练3.5天的成绩陈述",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c0.12"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 10
+        },
+        {
+          "chapterIndex": 9
+        },
+        {
+          "chapterIndex": 158
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-04",
+      "requirement": "RNN的顺序依赖和长程信息传递限制",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c1.3"
+        },
+        {
+          "claim": "c1.4"
+        },
+        {
+          "claim": "c1.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 21
+        },
+        {
+          "chapterIndex": 121
+        },
+        {
+          "chapterIndex": 128
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-05",
+      "requirement": "编码输入与输出长度可不同，自回归逐词生成",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c3.1"
+        },
+        {
+          "claim": "c3.2"
+        },
+        {
+          "claim": "c3.3"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 34
+        },
+        {
+          "chapterIndex": 23
+        },
+        {
+          "chapterIndex": 28
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-06",
+      "requirement": "六层、残差维度一致与512维",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c3.7"
+        },
+        {
+          "claim": "c4.0"
+        },
+        {
+          "claim": "c4.1"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 48
+        },
+        {
+          "chapterIndex": 66
+        },
+        {
+          "chapterIndex": 91
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-07",
+      "requirement": "LayerNorm与BatchNorm轴差别及变长统计不稳定",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c4.3"
+        },
+        {
+          "claim": "c4.4"
+        },
+        {
+          "claim": "c4.5"
+        },
+        {
+          "claim": "c4.6"
+        },
+        {
+          "claim": "c4.7"
+        },
+        {
+          "claim": "c4.8"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 57
+        },
+        {
+          "chapterIndex": 58
+        },
+        {
+          "chapterIndex": 60
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-08",
+      "requirement": "注意力为V加权和，权重由Q与K关系决定",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c5.5"
+        },
+        {
+          "claim": "c6.0"
+        },
+        {
+          "claim": "c6.1"
+        },
+        {
+          "claim": "c6.2"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 70
+        },
+        {
+          "chapterIndex": 71
+        },
+        {
+          "chapterIndex": 98
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-09",
+      "requirement": "按行softmax，权重非负和为1，两次矩阵乘法",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c6.2"
+        },
+        {
+          "claim": "c6.3"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 74
+        },
+        {
+          "chapterIndex": 75
+        },
+        {
+          "chapterIndex": 76
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-10",
+      "requirement": "除以sqrt(dk)避免softmax过于极端导致小梯度",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c6.4"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 80
+        },
+        {
+          "chapterIndex": 81
+        },
+        {
+          "chapterIndex": 65
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-11",
+      "requirement": "mask以大负数使不可见位置权重为0，训练预测一致",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c5.2"
+        },
+        {
+          "claim": "c5.3"
+        },
+        {
+          "claim": "c6.6"
+        },
+        {
+          "claim": "c7.0"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 84
+        },
+        {
+          "chapterIndex": 85
+        },
+        {
+          "chapterIndex": 55
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-12",
+      "requirement": "8头各64维，拼接后投影回512",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c7.1"
+        },
+        {
+          "claim": "c7.3"
+        },
+        {
+          "claim": "c7.4"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 91
+        },
+        {
+          "chapterIndex": 111
+        },
+        {
+          "chapterIndex": 166
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-13",
+      "requirement": "三类attention，交叉注意力Q来自解码器KV来自编码器",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c8.0"
+        },
+        {
+          "claim": "c8.1"
+        },
+        {
+          "claim": "c8.2"
+        },
+        {
+          "claim": "c8.4"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 103
+        },
+        {
+          "chapterIndex": 104
+        },
+        {
+          "chapterIndex": 105
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-14",
+      "requirement": "FFN共享逐位置MLP且512→2048→512",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c9.0"
+        },
+        {
+          "claim": "c9.1"
+        },
+        {
+          "claim": "c9.2"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 109
+        },
+        {
+          "chapterIndex": 111
+        },
+        {
+          "chapterIndex": 115
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-15",
+      "requirement": "attention汇聚序列信息后MLP映射语义，与RNN递传不同",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c9.3"
+        },
+        {
+          "claim": "c9.4"
+        },
+        {
+          "claim": "c9.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 178
+        },
+        {
+          "chapterIndex": 118
+        },
+        {
+          "chapterIndex": 120
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-16",
+      "requirement": "输入输出embedding共享权重并乘sqrt(d)",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c9.6"
+        },
+        {
+          "claim": "c10.4"
+        },
+        {
+          "claim": "c10.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 124
+        },
+        {
+          "chapterIndex": 73
+        },
+        {
+          "chapterIndex": 75
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "新版把缩放对象歧义放进待核对，但章节正文仍给出较确定解释；旧版不同位置的缩放对象也不一致。",
+      "affectedStrategy": "both"
+    },
+    {
+      "id": "technical-17",
+      "requirement": "位置编码用不同周期sin/cos向量与embedding相加以注入顺序",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c10.2"
+        },
+        {
+          "claim": "c10.3"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 132
+        },
+        {
+          "chapterIndex": 135
+        },
+        {
+          "chapterIndex": 130
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-18",
+      "requirement": "复杂度n²d与nd²和n/d条件，不颠倒比较或明确不确定",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c11.3"
+        },
+        {
+          "claim": "c11.4"
+        },
+        {
+          "claim": "c11.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 141
+        },
+        {
+          "chapterIndex": 140
+        },
+        {
+          "chapterIndex": 144
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-19",
+      "requirement": "顺序计算和最大信息路径的区别，受限邻域的取舍",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c11.2"
+        },
+        {
+          "claim": "c11.3"
+        },
+        {
+          "claim": "c11.4"
+        },
+        {
+          "claim": "c11.7"
+        },
+        {
+          "claim": "c11.9"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 140
+        },
+        {
+          "chapterIndex": 143
+        },
+        {
+          "chapterIndex": 150
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-20",
+      "requirement": "更少先验假设的代价：更多数据、更大模型而非必然更便宜",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c11.8"
+        },
+        {
+          "claim": "c13.7"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 152
+        },
+        {
+          "chapterIndex": 180
+        },
+        {
+          "chapterIndex": 156
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-21",
+      "requirement": "BPE共享词表37000且保留4.5万源数据疑点",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c12.0"
+        },
+        {
+          "claim": "c12.13"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 155
+        },
+        {
+          "chapterIndex": 154
+        },
+        {
+          "chapterIndex": 153
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "两版都保留原稿4.5万及3.7万共享词表，未静默改为外部数值；都未专门标出数据规模疑点。",
+      "affectedStrategy": "both"
+    },
+    {
+      "id": "technical-22",
+      "requirement": "8P100、base10万步12h、big30万步3.5d",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c12.1"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 158
+        },
+        {
+          "chapterIndex": 130
+        },
+        {
+          "chapterIndex": 166
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-23",
+      "requirement": "warmup4000与模型宽度/步数相关学习率",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c12.4"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 160
+        },
+        {
+          "chapterIndex": 167
+        },
+        {
+          "chapterIndex": 152
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-24",
+      "requirement": "dropout0.1与label smoothing疑点、不能默改来源数字",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c12.5"
+        },
+        {
+          "claim": "c12.6"
+        },
+        {
+          "claim": "c12.7"
+        },
+        {
+          "claim": "c12.8"
+        },
+        {
+          "claim": "c12.9"
+        },
+        {
+          "claim": "c12.15"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 161
+        },
+        {
+          "chapterIndex": 165
+        },
+        {
+          "chapterIndex": 166
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。",
+      "qualificationIssue": "两版保留正确类别0.1、其余0.9/词表等来源数字。旧版待核对明确提醒0.1/0.9疑点，新版没有单独提醒，属于本轮退步。",
+      "affectedStrategy": "structured"
+    },
+    {
+      "id": "technical-25",
+      "requirement": "big宽度和头数翻倍、dropout0.3",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c12.10"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 167
+        },
+        {
+          "chapterIndex": 168
+        },
+        {
+          "chapterIndex": 169
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-26",
+      "requirement": "写作评价：简洁但欠故事/设计动机",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c13.0"
+        },
+        {
+          "claim": "c13.1"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 171
+        },
+        {
+          "chapterIndex": 172
+        },
+        {
+          "chapterIndex": 173
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-27",
+      "requirement": "统一跨模态架构、预训练迁移与共同语义空间",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c13.2"
+        },
+        {
+          "claim": "c13.3"
+        },
+        {
+          "claim": "c13.4"
+        },
+        {
+          "claim": "c13.5"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 175
+        },
+        {
+          "chapterIndex": 177
+        },
+        {
+          "chapterIndex": 174
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    },
+    {
+      "id": "technical-28",
+      "requirement": "结尾限定标题：attention之外MLP和残差不可少，并鼓励新架构",
+      "wholeTopicPresent": {
+        "legacy": true,
+        "structured": true
+      },
+      "structuredClaims": [
+        {
+          "claim": "c13.6"
+        },
+        {
+          "claim": "c13.7"
+        },
+        {
+          "claim": "c13.8"
+        }
+      ],
+      "legacyCandidates": [
+        {
+          "chapterIndex": 178
+        },
+        {
+          "chapterIndex": 181
+        },
+        {
+          "chapterIndex": 41
+        }
+      ],
+      "assessment": "主题可定位；不代表该主题下每句话都正确或完整。"
+    }
+  ],
+  "publicationNote": "公开版保留检查要求、声明编号、候选章节定位和审阅结论；冻结原稿与输出正文仅保存在本机，不随源码分发。"
+}

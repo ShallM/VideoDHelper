@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-25",
+  "summary_version": "native-notes-v1-context3",
+  "summary_code_sha256": "b69953d51fad82abc3d981118460695d3be4028b08d6b15f1dd300ba664f8ee8",
+  "method": "Offline reproduction of current 700-character unit split and batches(units,4500); JSON UTF-8 byte counts are not token counts; initial groups are not total API calls. Compact source-ID lines are an unimplemented serialization comparison, excluding prompts, context overlap and output. No model requests.",
+  "rows": [
+    {
+      "label": "短新闻：平台字幕",
+      "task_id": "3261059F-A984-40D6-9E29-0F611DCF6541",
+      "transcript_sha256": "a091918f75d7911005052fcb139355db68805740e14bd199ed417170437b823e",
+      "last_caption_end_seconds": 429.7,
+      "source_segments": 192,
+      "text_characters": 2652,
+      "text_utf8_bytes": 5964,
+      "serialized_units_utf8_bytes": 18810,
+      "compact_source_id_lines_utf8_bytes": 7005,
+      "initial_groups": 5,
+      "mean_text_characters_per_group": 530.4
+    },
+    {
+      "label": "张仲景：本地转录",
+      "task_id": "5B82872F-2C0B-4C21-84BB-890EF21DE407",
+      "transcript_sha256": "11258c609f4e0934e637c87a035b5ff5dc2f7c62f15eb83ca2ebb6218fc6f61d",
+      "last_caption_end_seconds": 3342.872,
+      "source_segments": 1737,
+      "text_characters": 12988,
+      "text_utf8_bytes": 38604,
+      "serialized_units_utf8_bytes": 169701,
+      "compact_source_id_lines_utf8_bytes": 49652,
+      "initial_groups": 38,
+      "mean_text_characters_per_group": 341.79
+    },
+    {
+      "label": "Transformer 论文精读：本地转录",
+      "task_id": "D268C983-9022-410A-AE25-0D1E599BC507",
+      "transcript_sha256": "3687edd7cdf5edea80f492992b078b01225dea9d666c47f3becb11a2c078b63d",
+      "last_caption_end_seconds": 5224.398,
+      "source_segments": 2323,
+      "text_characters": 28161,
+      "text_utf8_bytes": 75996,
+      "serialized_units_utf8_bytes": 250371,
+      "compact_source_id_lines_utf8_bytes": 91146,
+      "initial_groups": 56,
+      "mean_text_characters_per_group": 502.88
+    },
+    {
+      "label": "短新闻：本地转录",
+      "task_id": "DC3F0926-A45A-44BD-9E09-CDEBA4CB266A",
+      "transcript_sha256": "911cd67fcff31b6115f20479b0250bb437c779345c6737c0607fc62e76d0fcbc",
+      "last_caption_end_seconds": 429.5,
+      "source_segments": 209,
+      "text_characters": 2730,
+      "text_utf8_bytes": 6106,
+      "serialized_units_utf8_bytes": 19913,
+      "compact_source_id_lines_utf8_bytes": 7249,
+      "initial_groups": 5,
+      "mean_text_characters_per_group": 546.0
+    }
+  ]
+}

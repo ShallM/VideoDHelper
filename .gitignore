@@ -1,0 +1,16 @@
+.build/
+build/
+.artifacts/
+dist/
+.DS_Store
+.swiftpm/
+.venv/
+.env
+.env.*
+!.env.example
+*.cookies.txt
+cookies.txt
+local-data/
+models/
+__pycache__/
+*.pyc

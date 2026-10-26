@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "model": "DeepSeek-V4.1-Flash",
+  "elapsed_seconds": 1.04,
+  "finish_reason": "stop",
+  "structured_output_valid": true,
+  "content": "{\"summary\":\"实验使用Transformer，学习率为3e-4，batch size为32；只报告验证集结果，不能将其当作测试集结果。\",\"key_terms\":[\"Transformer\",\"学习率3e-4\",\"batch size 32\",\"验证集结果\",\"测试集结果\"],\"source_ids\":[1,2]}",
+  "usage": {
+    "prompt_tokens": 147,
+    "total_tokens": 315,
+    "completion_tokens": 168,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 98
+    }
+  }
+}

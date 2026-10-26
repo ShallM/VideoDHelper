@@ -1,0 +1,342 @@
+{
+  "samples": {
+    "short": {
+      "legacy": {
+        "strategy": "legacy",
+        "model": "deepseek-v4.1-flash",
+        "sourceSHA256": "a091918f75d7911005052fcb139355db68805740e14bd199ed417170437b823e",
+        "sourceSegments": 192,
+        "sourceCharacters": 2652,
+        "chapters": 23,
+        "claims": 23,
+        "uncertainties": 5,
+        "responseCount": 10,
+        "elapsedSeconds": 66.171,
+        "attemptCount": 1,
+        "usage": {
+          "inputTokens": 11530,
+          "outputTokens": 22882,
+          "reasoningTokens": 17721,
+          "reportedTotalTokens": 34412,
+          "cachedInputTokens": 1984
+        },
+        "cacheReporting": {
+          "reportedResponses": 9,
+          "allResponses": 10,
+          "inputTokensOfReportedResponses": 9537,
+          "meaning": "Missing cache fields are unknown, not zero."
+        },
+        "legalCitations": true,
+        "condensedCoversAllSourceIDs": true,
+        "note": "These are structural checks, not semantic zero-omission claims.",
+        "billing": {
+          "pricedSubtotal": {
+            "CNY": 0.161505
+          },
+          "unknownCostRequests": 1,
+          "meaning": "Uses request-time prices; subtotal excludes unknown requests and is not a provider invoice."
+        }
+      },
+      "structured": {
+        "strategy": "structured",
+        "model": "deepseek-v4.1-flash",
+        "sourceSHA256": "a091918f75d7911005052fcb139355db68805740e14bd199ed417170437b823e",
+        "sourceSegments": 192,
+        "sourceCharacters": 2652,
+        "chapters": 4,
+        "claims": 23,
+        "uncertainties": 6,
+        "responseCount": 2,
+        "elapsedSeconds": 106.403,
+        "attemptCount": 1,
+        "usage": {
+          "inputTokens": 6431,
+          "outputTokens": 20789,
+          "reasoningTokens": 16195,
+          "reportedTotalTokens": 27220,
+          "cachedInputTokens": 2176
+        },
+        "cacheReporting": {
+          "reportedResponses": 2,
+          "allResponses": 2,
+          "inputTokensOfReportedResponses": 6431,
+          "meaning": "Missing cache fields are unknown, not zero."
+        },
+        "legalCitations": true,
+        "condensedCoversAllSourceIDs": true,
+        "note": "These are structural checks, not semantic zero-omission claims.",
+        "sourceParagraphs": 8,
+        "rereadCount": 0,
+        "losslessCompactText": true,
+        "reviewReadAllParagraphs": true,
+        "billing": {
+          "pricedSubtotal": {
+            "CNY": 0.174909
+          },
+          "unknownCostRequests": 0,
+          "meaning": "Uses request-time prices; subtotal excludes unknown requests and is not a provider invoice."
+        }
+      }
+    },
+    "history": {
+      "legacy": {
+        "strategy": "legacy",
+        "model": "deepseek-v4.1-flash",
+        "sourceSHA256": "11258c609f4e0934e637c87a035b5ff5dc2f7c62f15eb83ca2ebb6218fc6f61d",
+        "sourceSegments": 1737,
+        "sourceCharacters": 12988,
+        "chapters": 128,
+        "claims": 128,
+        "uncertainties": 5,
+        "responseCount": 105,
+        "elapsedSeconds": 971.631,
+        "attemptCount": 1,
+        "usage": {
+          "inputTokens": 129117,
+          "outputTokens": 333017,
+          "reasoningTokens": 281736,
+          "reportedTotalTokens": 462134,
+          "cachedInputTokens": 45824
+        },
+        "cacheReporting": {
+          "reportedResponses": 102,
+          "allResponses": 105,
+          "inputTokensOfReportedResponses": 124657,
+          "meaning": "Missing cache fields are unknown, not zero."
+        },
+        "legalCitations": true,
+        "condensedCoversAllSourceIDs": true,
+        "note": "These are structural checks, not semantic zero-omission claims.",
+        "billing": {
+          "pricedSubtotal": {
+            "CNY": 2.765987
+          },
+          "unknownCostRequests": 3,
+          "meaning": "Uses request-time prices; subtotal excludes unknown requests and is not a provider invoice."
+        }
+      },
+      "structured": {
+        "strategy": "structured",
+        "model": "deepseek-v4.1-flash",
+        "sourceSHA256": "11258c609f4e0934e637c87a035b5ff5dc2f7c62f15eb83ca2ebb6218fc6f61d",
+        "sourceSegments": 1737,
+        "sourceCharacters": 12988,
+        "chapters": 12,
+        "claims": 126,
+        "uncertainties": 22,
+        "responseCount": 24,
+        "elapsedSeconds": 815.475,
+        "attemptCount": 1,
+        "usage": {
+          "inputTokens": 190403,
+          "outputTokens": 217228,
+          "reasoningTokens": 187919,
+          "reportedTotalTokens": 407631,
+          "cachedInputTokens": 68352
+        },
+        "cacheReporting": {
+          "reportedResponses": 23,
+          "allResponses": 24,
+          "inputTokensOfReportedResponses": 181081,
+          "meaning": "Missing cache fields are unknown, not zero."
+        },
+        "legalCitations": true,
+        "condensedCoversAllSourceIDs": true,
+        "note": "These are structural checks, not semantic zero-omission claims.",
+        "sourceParagraphs": 45,
+        "rereadCount": 4,
+        "losslessCompactText": true,
+        "reviewReadAllParagraphs": true,
+        "billing": {
+          "pricedSubtotal": {
+            "CNY": 1.88376
+          },
+          "unknownCostRequests": 1,
+          "meaning": "Uses request-time prices; subtotal excludes unknown requests and is not a provider invoice."
+        }
+      }
+    },
+    "technical": {
+      "legacy": {
+        "strategy": "legacy",
+        "model": "deepseek-v4.1-flash",
+        "sourceSHA256": "3687edd7cdf5edea80f492992b078b01225dea9d666c47f3becb11a2c078b63d",
+        "sourceSegments": 2323,
+        "sourceCharacters": 28161,
+        "chapters": 182,
+        "claims": 182,
+        "uncertainties": 5,
+        "responseCount": 163,
+        "elapsedSeconds": 1214.308,
+        "attemptCount": 1,
+        "usage": {
+          "inputTokens": 182451,
+          "outputTokens": 487150,
+          "reasoningTokens": 424433,
+          "reportedTotalTokens": 669601,
+          "cachedInputTokens": 61824
+        },
+        "cacheReporting": {
+          "reportedResponses": 163,
+          "allResponses": 163,
+          "inputTokensOfReportedResponses": 182451,
+          "meaning": "Missing cache fields are unknown, not zero."
+        },
+        "legalCitations": true,
+        "condensedCoversAllSourceIDs": true,
+        "note": "These are structural checks, not semantic zero-omission claims.",
+        "billing": {
+          "pricedSubtotal": {
+            "CNY": 4.140927
+          },
+          "unknownCostRequests": 0,
+          "meaning": "Uses request-time prices; subtotal excludes unknown requests and is not a provider invoice."
+        }
+      },
+      "structured": {
+        "strategy": "structured",
+        "model": "deepseek-v4.1-flash",
+        "sourceSHA256": "3687edd7cdf5edea80f492992b078b01225dea9d666c47f3becb11a2c078b63d",
+        "sourceSegments": 2323,
+        "sourceCharacters": 28161,
+        "chapters": 14,
+        "claims": 126,
+        "uncertainties": 17,
+        "responseCount": 29,
+        "elapsedSeconds": 569.882,
+        "attemptCount": 1,
+        "usage": {
+          "inputTokens": 167125,
+          "outputTokens": 146651,
+          "reasoningTokens": 123341,
+          "reportedTotalTokens": 313776,
+          "cachedInputTokens": 57984
+        },
+        "cacheReporting": {
+          "reportedResponses": 29,
+          "allResponses": 29,
+          "inputTokensOfReportedResponses": 167125,
+          "meaning": "Missing cache fields are unknown, not zero."
+        },
+        "legalCitations": true,
+        "condensedCoversAllSourceIDs": true,
+        "note": "These are structural checks, not semantic zero-omission claims.",
+        "sourceParagraphs": 69,
+        "rereadCount": 4,
+        "losslessCompactText": true,
+        "reviewReadAllParagraphs": true,
+        "billing": {
+          "pricedSubtotal": {
+            "CNY": 1.393809
+          },
+          "unknownCostRequests": 0,
+          "meaning": "Uses request-time prices; subtotal excludes unknown requests and is not a provider invoice."
+        }
+      }
+    }
+  },
+  "recovery": {
+    "history": [
+      {
+        "phase": "chapter",
+        "checkpointCount": 2,
+        "exitSeconds": 0.058,
+        "allBytesAndMtimesUnchanged": true
+      }
+    ],
+    "technical": [
+      {
+        "phase": "chapter",
+        "checkpointCount": 6,
+        "exitSeconds": 0.048,
+        "allBytesAndMtimesUnchanged": true
+      },
+      {
+        "phase": "verify",
+        "checkpointCount": 19,
+        "exitSeconds": 0.028,
+        "allBytesAndMtimesUnchanged": true
+      }
+    ]
+  },
+  "development": {
+    "httpAttempts": 103,
+    "reportedTotalTokens": 1477241,
+    "unknownUsageAttempts": 7,
+    "billing": {
+      "pricedSubtotal": {
+        "CNY": 5.150217
+      },
+      "unknownCostRequests": 30,
+      "meaning": "Uses request-time prices; subtotal excludes unknown requests and is not a provider invoice."
+    },
+    "note": "All benchmark task IDs, deduplicated across saved variants; excludes final A/B response IDs. Includes cancellation and failed recovery probes."
+  },
+  "complete-replay-evidence": {
+    "short": {
+      "elapsedSeconds": 0.008,
+      "requests": 0,
+      "checkpointHits": 2,
+      "limitCheckpointHits": 0,
+      "tokensThisRun": 0
+    },
+    "history": {
+      "elapsedSeconds": 0.034,
+      "requests": 0,
+      "checkpointHits": 23,
+      "limitCheckpointHits": 1,
+      "tokensThisRun": 0
+    },
+    "technical": {
+      "elapsedSeconds": 0.036,
+      "requests": 0,
+      "checkpointHits": 29,
+      "limitCheckpointHits": 0,
+      "tokensThisRun": 0
+    }
+  },
+  "worker-resume-evidence": [
+    {
+      "sample": "short",
+      "strategy": "legacy",
+      "elapsedSeconds": 0.085,
+      "newHTTPAttempts": 0,
+      "state": "completed"
+    },
+    {
+      "sample": "history",
+      "strategy": "legacy",
+      "elapsedSeconds": 0.105,
+      "newHTTPAttempts": 0,
+      "state": "completed"
+    },
+    {
+      "sample": "technical",
+      "strategy": "legacy",
+      "elapsedSeconds": 0.123,
+      "newHTTPAttempts": 0,
+      "state": "completed"
+    },
+    {
+      "sample": "short",
+      "strategy": "structured",
+      "elapsedSeconds": 0.075,
+      "newHTTPAttempts": 0,
+      "state": "completed"
+    },
+    {
+      "sample": "history",
+      "strategy": "structured",
+      "elapsedSeconds": 0.108,
+      "newHTTPAttempts": 0,
+      "state": "completed"
+    },
+    {
+      "sample": "technical",
+      "strategy": "structured",
+      "elapsedSeconds": 0.111,
+      "newHTTPAttempts": 0,
+      "state": "completed"
+    }
+  ]
+}
