@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import tarfile
@@ -185,6 +186,15 @@ def build_app():
                 run("lipo", path, "-thin", "arm64", "-output", thin)
                 thin.chmod(path.stat().st_mode)
                 thin.replace(path)
+            # Some upstream wheels and Swift toolchains retain their build
+            # machine's search paths even when all required libraries are bundled.
+            headers = subprocess.check_output(["otool", "-l", str(path)], text=True)
+            for block in headers.split("Load command "):
+                if "LC_RPATH" not in block:
+                    continue
+                match = re.search(r"\bpath\s+(.*?)\s+\(offset", block)
+                if match and not match[1].startswith(("@", "/usr/lib", "/System/Library/")):
+                    run("install_name_tool", "-delete_rpath", match[1], path, stderr=subprocess.DEVNULL)
             run("codesign", "--force", "--sign", "-", path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     run("codesign", "--force", "--sign", "-", app)
     run("codesign", "--verify", "--deep", "--strict", app)

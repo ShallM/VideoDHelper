@@ -83,6 +83,10 @@ def inspect_app(app):
             raise ValueError("Unexpected architecture: " + str(path.relative_to(app)))
         headers = command("otool", "-l", path)
         for block in headers.split("Load command "):
+            if "LC_RPATH" in block:
+                rpath = re.search(r"\bpath\s+(.*?)\s+\(offset", block)
+                if rpath and not rpath[1].startswith(("@", "/usr/lib", "/System/Library/")):
+                    raise ValueError("External runtime search path: " + str(path.relative_to(app)))
             if "LC_BUILD_VERSION" in block:
                 match = re.search(r"\bminos\s+(\d+(?:\.\d+)+)", block)
             elif "LC_VERSION_MIN_MACOSX" in block:

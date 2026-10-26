@@ -10,7 +10,7 @@
 - 包内 CPython 3.12.15、MLX 0.32.4、mlx-whisper 0.4.3、PyTorch 2.14.1、yt-dlp 2026.10.21、FFmpeg 9.0.2。
 - 应用使用 `-I -B`，只保留包内工具与系统 PATH；不读取开发 `.env` 或用户 Python site-packages。
 
-`validate-distribution.py` 使用本机模拟 Chat Completions，不调用付费模型：检查 177 个 Mach-O 均为 arm64，最低系统不高于 14.0；没有 Homebrew / 开发目录动态链接，也没有指向包外的符号链接。验证包内 Metal、下载器版本、音频重采样、完整字幕整理及导出，再次执行任务不新增 API 请求、检查点内容保持不变。运行前后均核验完整签名。
+`validate-distribution.py` 使用本机模拟 Chat Completions，不调用付费模型：检查 177 个 Mach-O 均为 arm64，最低系统不高于 14.0；没有 Homebrew / 开发目录动态链接或运行时搜索路径，也没有指向包外的符号链接。验证包内 Metal、下载器版本、音频重采样、完整字幕整理及导出，再次执行任务不新增 API 请求、检查点内容保持不变。运行前后均核验完整签名。
 
 ## 包内转录实测
 

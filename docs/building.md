@@ -77,6 +77,6 @@ python3 scripts/validate-distribution.py dist/VideoDHelper.app --report build/di
 
 `runtime.json` 是发行版本、最低系统和下载摘要的来源；`packaging/requirements.lock` 固定全部传递依赖及哈希。更新依赖后需重新构建、运行安装验收，并同步第三方清单。修改版本时也同步开发构建脚本与文档。
 
-验证脚本检查所有 Mach-O 的架构、最低系统、外部动态库、签名和符号链接，使用系统 PATH 执行包内 Metal 检查、FFmpeg 与本机模拟 API，复跑任务验证检查点不重复调用。它不调用付费模型、不需要 B 站账号。`--ui-fixture <绝对测试目录>` 可启动带延迟的本机模拟接口，供 GUI 退出 / 恢复验收；测试时用 `VIDEOHELPER_DATA_DIRECTORY` 指向该目录，避免触及个人任务。
+验证脚本检查所有 Mach-O 的架构、最低系统、外部动态库与运行时搜索路径、签名和符号链接，使用系统 PATH 执行包内 Metal 检查、FFmpeg 与本机模拟 API，复跑任务验证检查点不重复调用。它不调用付费模型、不需要 B 站账号。`--ui-fixture <绝对测试目录>` 可启动带延迟的本机模拟接口，供 GUI 退出 / 恢复验收；测试时用 `VIDEOHELPER_DATA_DIRECTORY` 指向该目录，避免触及个人任务。
 
 `build-distribution.py` 使用 ad-hoc 签名，不伪装 Developer ID / 公证。发行前还需执行 Finder 拖拽安装、推出 DMG 后从 `/Applications` 启动、重复开关窗口、工作进程退出与内存观察；实际记录见 [0.6 验收](validation-0.6.md)。CI 当前仍验证开发构建，完整 DMG 在本机经过独立验收后发布。
