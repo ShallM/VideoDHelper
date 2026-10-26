@@ -164,7 +164,7 @@ struct WorkspaceView: View {
                     ForEach(model.visibleHistory) { job in taskRow(job) }
                 }
             }.frame(minHeight: 80, maxHeight: .infinity)
-            Text("本机开发预览 · 0.5.0").font(.caption2).foregroundStyle(.tertiary)
+            Text("VideoDHelper · \(AppInfo.version)").font(.caption2).foregroundStyle(.tertiary)
         }.padding(20).background(.quaternary.opacity(0.3))
     }
 

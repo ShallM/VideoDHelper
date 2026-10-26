@@ -2,6 +2,19 @@
 
 记录已实现功能。取舍、已知问题和后续计划见[开发记录](docs/development-log.md)。历史版本不是已发布的 GitHub 二进制 Release。
 
+## 0.6.0 — 2026-10-26
+
+- 首个自包含 Apple Silicon DMG，拖入 Applications 安装；macOS 14+。
+- 内置 CPython、MLX / Metal、mlx-whisper、yt-dlp、PyTorch 与独立 FFmpeg，无需 Homebrew。
+- 固定下载摘要、完整 Python 依赖锁、组件清单和第三方源码附件。
+- 应用图标、统一版本号、帮助与许可入口、安装 / 升级指南。
+- 检查 DMG 内部应用签名，避免隐藏扩展名元数据破坏签名；安装页兼容 Finder 路径栏。
+- 修复完成进程被长超时计时器持有、登录观察器生命周期和退出时残留工作进程问题。
+- 发行包不加载开发环境凭据，已有本机任务和模型继续复用。
+- 使用 ad-hoc 签名；**没有 Developer ID / Apple 公证**，Release 明确标注。
+
+[安装指南](docs/installing.md) · [验收与限制](docs/validation-0.6.md)。
+
 ## 0.5.0 — 2026-10-25
 
 - 紧凑原稿、短稿整体阅读、长稿全文结构和自然章节。

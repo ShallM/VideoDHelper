@@ -8,11 +8,11 @@
 
 [![macOS](https://img.shields.io/badge/macOS-14%2B-171A21?logo=apple&logoColor=white)](docs/building.md)
 [![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-MLX_%2B_Metal-13B8A6)](docs/user-guide.md#本地转录与模型)
-[![Preview](https://img.shields.io/badge/preview-0.5.0-4479D6)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/release-0.6.0-4479D6)](https://github.com/ShallM/VideoDHelper/releases/latest)
 [![Build](https://github.com/ShallM/VideoDHelper/actions/workflows/ci.yml/badge.svg)](https://github.com/ShallM/VideoDHelper/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-PolyForm_Noncommercial-8867C8)](LICENSE)
 
-[开始使用](#开始使用) · [功能一览](#功能一览) · [使用指南](docs/user-guide.md) · [开发日志](CHANGELOG.md) · [实测报告](docs/validation-0.5.md)
+[下载 DMG](https://github.com/ShallM/VideoDHelper/releases/latest) · [安装指南](docs/installing.md) · [开始使用](#开始使用) · [功能一览](#功能一览) · [使用指南](docs/user-guide.md) · [开发日志](CHANGELOG.md) · [实测报告](docs/validation-0.5.md)
 
 </div>
 
@@ -21,7 +21,7 @@
 <p align="center"><sub>0.5.0 原生应用实拍。笔记内容用于展示整理能力，保留来源时间以便回看；不是外部事实核查。</sub></p>
 
 > [!IMPORTANT]
-> 当前发布的是 **0.5.0 源码与开发构建**。你可以在自己的 Mac 上构建运行；可脱离开发环境安装的 `.app` / DMG、签名公证和 GitHub Release 将在下一阶段提供。Actions 构建产物用于验证和开发，仍依赖构建时的 Python 环境。
+> **0.6.0 提供独立 DMG：仅支持 Apple Silicon（M 系列），macOS 14+。** 内置 Python、MLX、yt-dlp 和 FFmpeg，拖入“应用程序”即可安装。**本版未公证**，首次打开可能需要按 [安装指南](docs/installing.md#本版未公证首次打开) 在系统设置中确认。模型权重首次使用时准备，API 由你自行配置。
 
 ## 功能一览
 
@@ -38,25 +38,18 @@
 
 ## 开始使用
 
-需要 **macOS 14+**、**Swift 6 工具链**、Python 3、uv 和 FFmpeg。本地转录需要 Apple Silicon；Intel Mac 可使用已有或导入的字幕，本轮未实机验收 Intel。
+从 **[GitHub Release 下载 DMG](https://github.com/ShallM/VideoDHelper/releases/latest)** → 打开 → 将 VideoDHelper 拖入 Applications → 复制完成后推出磁盘映像 → 从“应用程序”启动。
 
-```sh
-# 已装好 Xcode / Command Line Tools 和 Homebrew 后
-brew install python@3.12 uv ffmpeg
+![DMG 安装界面：将 VideoDHelper 拖到 Applications](docs/images/dmg-installer.png)
 
-git clone https://github.com/ShallM/VideoDHelper.git
-cd VideoDHelper
-zsh scripts/setup-tools.sh
-zsh scripts/build-app.sh
-open build/VideoDHelper.app
-```
+**无需 Homebrew 或开发工具。** 首次打开与未公证说明见 [安装指南](docs/installing.md)。需要自行构建或修改代码时，使用 [开发构建说明](docs/building.md)。
 
 1. **配置模型** — 按 `⌘,` 打开设置，在“模型服务”填写 OpenAI 兼容的 Base URL、API Key 和模型 ID，测试并保存默认模型。
 2. **放入视频** — 粘贴分享文字，点“读取视频信息”。需要账号权限时，在应用中完成 B 站登录。
 3. **选择处理方式** — 保持字幕优先，或使用本地 Whisper；按需选择下载规格和是否保留媒体。
 4. **生成与回看** — 点“生成学习笔记”，在三种阅读视图之间切换，用来源时间返回视频核对，或导出结果。
 
-已有字幕文件也能从工具栏直接导入。完整说明见 [使用指南](docs/user-guide.md)；环境准备、开发构建限制及故障排查见 [构建说明](docs/building.md)。
+已有字幕文件也能从工具栏直接导入。完整说明见 [使用指南](docs/user-guide.md)；安装与升级见 [安装指南](docs/installing.md)，源码构建见 [构建说明](docs/building.md)。
 
 ## 长视频如何整理
 
@@ -104,12 +97,13 @@ flowchart LR
 
 | 文档 | 内容 |
 |---|---|
+| [安装与升级](docs/installing.md) | DMG、首次打开、数据位置与校验和 |
 | [使用指南](docs/user-guide.md) | 登录、下载选择、三种文字、项目、恢复与导出 |
 | [构建与开发](docs/building.md) | 环境、构建、测试、CI 产物、常见问题 |
-| [版本日志](CHANGELOG.md) | 0.1 → 0.5 的功能和修复 |
+| [版本日志](CHANGELOG.md) | 0.1 → 0.6 的功能和修复 |
 | [开发记录](docs/development-log.md) | 关键取舍、验证结论与下一阶段 |
 | [总结设计](docs/summarization-v2.md) · [技术调研](docs/summarization-research-2026-10-25.md) | 全文阅读、来源核验、有界回读与设计依据 |
-| [0.2 验收](docs/validation-0.2.md) · [0.3 验收](docs/validation-0.3.md) · [0.4 验收](docs/validation-0.4.md) · [0.5 验收](docs/validation-0.5.md) | 真实样本、用量口径、恢复和已知问题 |
+| [0.2 验收](docs/validation-0.2.md) · [0.3 验收](docs/validation-0.3.md) · [0.4 验收](docs/validation-0.4.md) · [0.5 验收](docs/validation-0.5.md) · [0.6 安装验收](docs/validation-0.6.md) | 真实样本、用量口径、恢复和已知问题 |
 | [需求与历史方案](docs/project-plan.md) · [下载器调研](docs/downloader-research.md) | 产品范围与技术选择背景 |
 
 <details>
@@ -132,7 +126,7 @@ PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v
 python3 scripts/check-publication.py
 ```
 
-0.5 功能基线：41 项 Swift、51 项 Python 测试。CI 运行离线测试并构建开发 `.app`，不访问 B 站账号、不下载模型、不调用付费模型。贡献前请阅读 [贡献指南](CONTRIBUTING.md)。
+0.6 功能基线：43 项 Swift、53 项 Python 测试。CI 运行离线测试并构建开发 `.app`，不访问 B 站账号、不下载模型、不调用付费模型。贡献前请阅读 [贡献指南](CONTRIBUTING.md)。
 
 </details>
 
@@ -141,7 +135,7 @@ python3 scripts/check-publication.py
 - 已测试普通投稿视频与单个分 P 链接；批量队列、合集、番剧和付费课程尚未逐项验收。
 - 主要面向中文学习视频；最长完整实测 87:05。画面中的代码、公式、图表和关键帧尚未接入。
 - 来源覆盖不等于语义正确；专名、数字、医疗或其他专业论断应回看来源。当前不做外部事实核查。
-- **下一阶段：** 整理可分发的 macOS 应用，处理 Python / FFmpeg 依赖、模型准备、签名与安装体验，再发布 GitHub Release。
+- **分发限制：** 本版仅 arm64 / macOS 14+，未公证；本机实测为 M4 / macOS 26.6.2，尚未覆盖 macOS 14 真机与所有 M 系列。后续补充兼容性与 Developer ID 公证。
 
 ## 许可与致谢
 

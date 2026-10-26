@@ -3,9 +3,7 @@ import Darwin
 
 public enum BilibiliCookies {
     public static var fileURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("VideoDHelper", isDirectory: true)
-            .appendingPathComponent("bilibili-cookies.txt")
+        AppStorage.root.appendingPathComponent("bilibili-cookies.txt")
     }
 
     /// Only cookies from this application's Bilibili web view are passed here.

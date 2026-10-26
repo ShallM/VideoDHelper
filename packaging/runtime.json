@@ -1,0 +1,22 @@
+{
+  "version": "0.6.0",
+  "build": "7",
+  "minimumMacOS": "14.0",
+  "python": {
+    "version": "3.12.15",
+    "filename": "cpython-3.12.15+20261021-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.12.15%2B20261021-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "sha256": "7b8d00b751db21cea87dc551a8f8165147c5fbc5251d5537d7e5497dde00a219"
+  },
+  "pythonBuildSource": {
+    "filename": "python-build-standalone-20261021.tar.gz",
+    "url": "https://github.com/astral-sh/python-build-standalone/archive/refs/tags/20261021.tar.gz",
+    "sha256": "e82909cfa3a7bf9f3ec655b8c565d67bd7fc2126aa4d8ee67c6348d8f70d036c"
+  },
+  "ffmpeg": {
+    "version": "9.0.2",
+    "filename": "FFmpeg-n9.0.2.tar.gz",
+    "url": "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n9.0.2.tar.gz",
+    "sha256": "6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9"
+  }
+}

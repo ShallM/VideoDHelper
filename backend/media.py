@@ -18,6 +18,11 @@ MODELS = {"turbo": "mlx-community/whisper-large-v3-turbo", "small": "mlx-communi
 
 
 def executable(name):
+    if directory := os.environ.get("VIDEOHELPER_BUNDLED_TOOLS"):
+        candidate = Path(directory) / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+        raise UserError(f"应用内的 {name} 不完整，请重新安装 VideoDHelper。")
     path = shutil.which(name)
     if path:
         return path

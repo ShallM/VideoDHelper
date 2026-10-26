@@ -91,7 +91,7 @@ public enum BilibiliProbe {
             arguments += ["--cookies", cookieFile.path]
         }
         arguments += ["--", reference.url.absoluteString]
-        let output = try await ProcessRunner.run(path: path, arguments: arguments)
+        let output = try await ProcessRunner.run(path: path, arguments: arguments, processGroup: true)
         return try VideoMetadata.decode(output, reference: reference)
     }
 
@@ -124,7 +124,8 @@ public enum BilibiliProbe {
 
 enum ProcessRunner {
     static func run(path: String, arguments: [String], timeoutSeconds: Double = 45,
-                    processGroup: Bool = false, onOutput: (@Sendable (Data) -> Void)? = nil) async throws -> Data {
+                    processGroup: Bool = false, registry: ProcessRegistry = .shared,
+                    onOutput: (@Sendable (Data) -> Void)? = nil) async throws -> Data {
         try Task.checkCancellation()
         let manager = FileManager.default
         let directory = manager.temporaryDirectory.appendingPathComponent("VideoDHelper-\(UUID().uuidString)", isDirectory: true)
@@ -143,6 +144,7 @@ enum ProcessRunner {
         process.standardOutput = stdout
         process.standardError = stderr
         process.standardInput = FileHandle.nullDevice
+        defer { registry.remove(process); process.terminationHandler = nil }
         @Sendable func signalProcess(_ signal: Int32) {
             guard process.isRunning else { return }
             if processGroup { kill(-process.processIdentifier, signal) }
@@ -157,21 +159,23 @@ enum ProcessRunner {
             }
         }
         defer { observer.cancel() }
-        let timeout = DispatchWorkItem {
-            signalProcess(SIGTERM)
+        // A cancelled DispatchWorkItem still retains its captures until its
+        // deadline (up to four hours). A cancellable sleep releases them promptly.
+        let timeout = Task {
+            do {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                signalProcess(SIGTERM)
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                signalProcess(SIGKILL)
+            } catch { }
         }
-        let forcedTimeout = DispatchWorkItem {
-            signalProcess(SIGKILL)
-        }
-        defer { timeout.cancel(); forcedTimeout.cancel() }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: timeout)
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds + 3, execute: forcedTimeout)
+        defer { timeout.cancel() }
         let status: Int32 = try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
                 do {
                     try Task.checkCancellation()
-                    try process.run()
+                    try registry.launch(process, group: processGroup)
                     if Task.isCancelled { signalProcess(SIGTERM) }
                 } catch { continuation.resume(throwing: error) }
             }

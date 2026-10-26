@@ -9,6 +9,7 @@ final class BilibiliLoginController: NSObject, ObservableObject, WKNavigationDel
     @Published var isSaving = false
     @Published var sessionDetected = false
     @Published var isLoading = true
+    private var isClosed = true
 
     override init() {
         let configuration = WKWebViewConfiguration()
@@ -18,18 +19,36 @@ final class BilibiliLoginController: NSObject, ObservableObject, WKNavigationDel
         // WKWebView's default UA lacks Safari's Version token. Bilibili's
         // browser check otherwise redirects a successful login to an upgrade page.
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+        open()
+    }
+
+    func open() {
+        guard isClosed else { return }
+        isClosed = false
+        isLoading = true
+        isSaving = false
+        sessionDetected = false
+        message = "在 B 站官方页面扫码或登录，然后点击“使用当前会话”。"
         webView.navigationDelegate = self
-        configuration.websiteDataStore.httpCookieStore.add(self)
+        webView.configuration.websiteDataStore.httpCookieStore.add(self)
         refreshSession()
         webView.load(URLRequest(url: URL(string: "https://passport.bilibili.com/login")!))
     }
 
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) { refreshSession() }
 
+    func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.configuration.websiteDataStore.httpCookieStore.remove(self)
+    }
+
     private func refreshSession() {
         webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.isClosed else { return }
                 if self.containsSession(cookies) {
                     self.sessionDetected = true
                     self.isLoading = false
@@ -58,7 +77,7 @@ final class BilibiliLoginController: NSObject, ObservableObject, WKNavigationDel
         isSaving = true
         webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.isClosed else { return }
                 defer { self.isSaving = false }
                 let loggedIn = self.containsSession(cookies)
                 guard loggedIn else {
@@ -112,5 +131,7 @@ struct BilibiliLoginView: View {
                 }.buttonStyle(.borderedProminent).disabled(controller.isSaving)
             }
         }.padding(20)
+        .onAppear { controller.open() }
+        .onDisappear { controller.close() }
     }
 }

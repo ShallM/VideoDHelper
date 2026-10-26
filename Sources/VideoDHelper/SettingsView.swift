@@ -128,7 +128,7 @@ struct SettingsView: View {
             Spacer()
             VStack(alignment: .leading, spacing: 7) {
                 Label("本机工作空间", systemImage: "internaldrive").font(.caption.weight(.medium))
-                Text("VideoDHelper 0.5.0\nmacOS 开发预览").font(.caption2).foregroundStyle(.secondary).lineSpacing(4)
+                Text("VideoDHelper \(AppInfo.version)\nApple Silicon · macOS").font(.caption2).foregroundStyle(.secondary).lineSpacing(4)
             }
         }.padding(20).frame(width: 188).frame(maxHeight: .infinity).background(.thinMaterial)
     }

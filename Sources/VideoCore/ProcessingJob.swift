@@ -2,7 +2,11 @@ import Foundation
 
 public enum AppStorage {
     public static var root: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("VideoDHelper", isDirectory: true)
+        // Isolates packaging/CI smoke tests from a person's real library.
+        if let directory = ProcessInfo.processInfo.environment["VIDEOHELPER_DATA_DIRECTORY"], directory.hasPrefix("/") {
+            return URL(fileURLWithPath: directory, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("VideoDHelper", isDirectory: true)
     }
     public static var jobs: URL { root.appendingPathComponent("tasks", isDirectory: true) }
 
@@ -49,6 +53,7 @@ public struct APISettings: Codable, Sendable {
     public init() {}
 
     public static var developmentEnvironment: URL? {
+        if Bundle.main.object(forInfoDictionaryKey: "VideoDHelperDistribution") as? Bool == true { return nil }
         let resource = Bundle.main.resourceURL?.appendingPathComponent("development-env-path.txt")
         if let resource, let path = try? String(contentsOf: resource, encoding: .utf8) {
             return URL(fileURLWithPath: path.trimmingCharacters(in: .whitespacesAndNewlines))
