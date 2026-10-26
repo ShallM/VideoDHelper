@@ -24,29 +24,32 @@ jobs:
           python-version: '3.12'
       - name: Prepare offline test environment
         run: |
-          mkdir -p .artifacts
+          mkdir -p build/ci-artifacts
           python -m venv .venv
-          { sw_vers; uname -m; swift --version; python --version; git rev-parse HEAD; } > .artifacts/environment.txt
+          { sw_vers; uname -m; swift --version; python --version; git rev-parse HEAD; } > build/ci-artifacts/environment.txt
       - name: Check public files and documentation
-        run: python scripts/check-publication.py 2>&1 | tee .artifacts/publication.log
+        run: python scripts/check-publication.py 2>&1 | tee build/ci-artifacts/publication.log
       - name: Python tests (no external APIs)
-        run: PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v 2>&1 | tee .artifacts/python-tests.log
+        run: PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v 2>&1 | tee build/ci-artifacts/python-tests.log
       - name: Swift tests
-        run: zsh scripts/swift-project.sh test 2>&1 | tee .artifacts/swift-tests.log
+        run: zsh scripts/swift-project.sh test 2>&1 | tee build/ci-artifacts/swift-tests.log
       - name: Build development app
-        run: zsh scripts/build-app.sh 2>&1 | tee .artifacts/build.log
+        run: zsh scripts/build-app.sh 2>&1 | tee build/ci-artifacts/build.log
       - name: Verify and archive development build
         run: |
-          codesign --verify --deep --strict --verbose=2 build/VideoDHelper.app 2>&1 | tee .artifacts/signature.log
-          cp docs/building.md .artifacts/BUILDING.md
-          printf '%s\n' 'Development build only: requires the build-time Python environment and external FFmpeg. This is not a portable installation package. See BUILDING.md.' > .artifacts/READ-ME-FIRST.txt
-          ditto -c -k --keepParent build/VideoDHelper.app .artifacts/VideoDHelper-development-macOS-arm64.zip
-          shasum -a 256 .artifacts/VideoDHelper-development-macOS-arm64.zip > .artifacts/SHA256SUMS.txt
+          codesign --verify --deep --strict --verbose=2 build/VideoDHelper.app 2>&1 | tee build/ci-artifacts/signature.log
+          cp docs/building.md build/ci-artifacts/BUILDING.md
+          printf '%s\n' 'Development build only: requires the build-time Python environment and external FFmpeg. This is not a portable installation package. See BUILDING.md.' > build/ci-artifacts/READ-ME-FIRST.txt
+          ditto -c -k --keepParent build/VideoDHelper.app build/ci-artifacts/VideoDHelper-development-macOS-arm64.zip
+          (
+            cd build/ci-artifacts
+            shasum -a 256 VideoDHelper-development-macOS-arm64.zip > SHA256SUMS.txt
+          )
       - name: Upload development build
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: VideoDHelper-development-macOS-arm64-${{ github.sha }}
-          path: .artifacts/
+          path: build/ci-artifacts/
           retention-days: 30
           if-no-files-found: error
       - name: Upload diagnostics on failure
@@ -54,5 +57,5 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macOS-diagnostics-${{ github.run_id }}
-          path: .artifacts/*.log
+          path: build/ci-artifacts/*.log
           retention-days: 14
