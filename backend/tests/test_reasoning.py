@@ -6,8 +6,8 @@ import unittest
 from unittest.mock import Mock, patch
 import urllib.error
 
-from common import UserError
-from summary import ChatClient, OutputLimit, InputContextLimit, ResponseOutputLimit, reasoning_effort
+from common import UserError, write_json
+from summary import ChatClient, OutputLimit, InputContextLimit, ResponseOutputLimit, ReasoningOutputExhausted, reasoning_effort
 
 
 class ReasoningTests(unittest.TestCase):
@@ -141,6 +141,64 @@ class ReasoningTests(unittest.TestCase):
             with self.assertRaisesRegex(UserError, "不会继续自动拆分"):
                 resumed.complete("prompt", {"source": "text"}, self.validate)
         request.assert_not_called()
+
+    def test_cancel_before_limit_marker_preserves_response_classification_without_new_request(self):
+        for content, kind, expected in (("", "no_final_output", ReasoningOutputExhausted),
+                                        ('{"private-final":', "output_limit", ResponseOutputLimit)):
+            with self.subTest(kind=kind):
+                directory = self.folder / kind
+                config = {**self.config, "summaryVersion": "dialogue-reader-v2.0"}
+                client = ChatClient(config, directory, lambda *args: None)
+                def interrupted_marker(path, value):
+                    if Path(path).parent.name == "limits": raise KeyboardInterrupt()
+                    write_json(path, value)
+                with patch.object(client, "_request", return_value=self.response(content, reason="length", reasoning="private-thought")) as network, patch("summary.write_json", side_effect=interrupted_marker):
+                    with self.assertRaises(KeyboardInterrupt):
+                        client.complete("prompt", {}, self.validate, output_tokens=131072)
+                self.assertEqual(network.call_count, 1)
+                self.assertEqual(list((directory / "limits").glob("*.json")), [])
+                raw = (directory / "usage.jsonl").read_text()
+                entry = json.loads(raw)
+                self.assertEqual(entry["limitKind"], kind)
+                self.assertEqual(entry["noFinalOutput"], content == "")
+                self.assertNotIn("private-thought", raw)
+                self.assertNotIn("private-final", raw)
+                resumed = ChatClient(config, directory, lambda *args: None)
+                with patch.object(resumed, "_request", side_effect=AssertionError("no repeat paid request")) as network:
+                    with self.assertRaises(expected):
+                        resumed.complete("prompt", {}, self.validate, output_tokens=131072)
+                network.assert_not_called()
+                self.assertEqual(resumed.request_count, 0)
+                self.assertEqual(resumed.limit_hits, 1)
+
+    def test_unknown_legacy_length_is_conservative_only_for_dialogue_reader(self):
+        for version, expected in (("dialogue-reader-v2.0", ReasoningOutputExhausted), ("legacy-video", ResponseOutputLimit)):
+            with self.subTest(version=version):
+                directory = self.folder / version
+                config = {**self.config, "summaryVersion": version}
+                client = ChatClient(config, directory, lambda *args: None)
+                with patch.object(client, "_request", return_value=self.response(reason="length")):
+                    with self.assertRaises(ResponseOutputLimit): client.complete("prompt", {}, self.validate)
+                marker = next((directory / "limits").glob("*.json")); marker.unlink()
+                entry = json.loads((directory / "usage.jsonl").read_text())
+                entry.pop("limitKind"); entry.pop("noFinalOutput")
+                (directory / "usage.jsonl").write_text(json.dumps(entry) + "\n")
+                resumed = ChatClient(config, directory, lambda *args: None)
+                with patch.object(resumed, "_request") as network:
+                    with self.assertRaises(expected) as error: resumed.complete("prompt", {}, self.validate)
+                network.assert_not_called()
+                if expected is ReasoningOutputExhausted: self.assertIn("无法确认是否包含正文", str(error.exception))
+
+    def test_explicit_limit_marker_precedes_log_classification(self):
+        client = self.client(summaryVersion="dialogue-reader-v2.0")
+        with patch.object(client, "_request", return_value=self.response("", reason="length")):
+            with self.assertRaises(ReasoningOutputExhausted): client.complete("prompt", {}, self.validate)
+        marker = next((self.folder / "limits").glob("*.json"))
+        write_json(marker, {"kind": "provider_context_limit"})
+        resumed = self.client(summaryVersion="dialogue-reader-v2.0")
+        with patch.object(resumed, "_request") as network:
+            with self.assertRaises(InputContextLimit): resumed.complete("prompt", {}, self.validate)
+        network.assert_not_called()
 
     def test_unsupported_parameter_error_does_not_silently_downgrade(self):
         client = self.client("max")

@@ -48,7 +48,7 @@ class ResponseOutputLimit(OutputLimit):
 
 
 class ReasoningOutputExhausted(UserError):
-    """A metered response exhausted its output budget without a final answer."""
+    """No final answer, or legacy limit evidence too weak for safe splitting."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -90,6 +90,7 @@ class ChatClient:
         self.limit_hits = 0
         self.calls = []
         self.known_output_limits = set()
+        self.known_limit_kinds = {}
         previous_usage = self.directory / "usage.jsonl"
         if previous_usage.exists() and previous_usage.stat().st_size <= 16 * 1024 * 1024:
             # Recover limits recorded before a process could persist the marker,
@@ -100,10 +101,17 @@ class ChatClient:
                 try:
                     entry = json.loads(line)
                     if isinstance(entry, dict) and isinstance(entry.get("step"), str):
-                        latest[entry["step"]] = entry.get("finish_reason")
+                        latest[entry["step"]] = entry
                 except (ValueError, TypeError):
                     continue
-            self.known_output_limits = {step for step, reason in latest.items() if reason == "length"}
+            self.known_output_limits = {step for step, entry in latest.items() if entry.get("finish_reason") == "length"}
+            for step in self.known_output_limits:
+                entry = latest[step]
+                kind = entry.get("limitKind")
+                if kind in ("no_final_output", "output_limit"):
+                    self.known_limit_kinds[step] = kind
+                elif type(entry.get("noFinalOutput")) is bool:
+                    self.known_limit_kinds[step] = "no_final_output" if entry["noFinalOutput"] else "output_limit"
 
     def complete(self, prompt, payload, validator, output_tokens=8192, phase=None):
         identity = {"version": self.config.get("summaryVersion", VERSION), "base": self.endpoint, "model": self.config["model"],
@@ -125,19 +133,24 @@ class ChatClient:
                 return value
             except (ValueError, KeyError, TypeError):
                 path.unlink()
-        if limit_path.exists() and read_json(limit_path).get("kind") == "no_final_output":
+        # A completed marker is authoritative. The usage log also records the
+        # classification before marker persistence, closing the cancellation gap.
+        marker_kind = read_json(limit_path).get("kind") if limit_path.exists() else None
+        cached_kind = marker_kind if marker_kind in ("no_final_output", "output_limit", "provider_context_limit") else self.known_limit_kinds.get(path.stem)
+        if cached_kind == "no_final_output":
             with self.usage_lock:
                 self.limit_hits += 1
                 self.calls.append({"phase": phase, "checkpoint": path.stem, "limitCached": True})
             raise ReasoningOutputExhausted("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
-        if (self.config.get("summaryVersion") and limit_path.exists()) or path.stem in self.known_output_limits:
+        if cached_kind is not None or path.stem in self.known_output_limits:
             # A resumable fallback must not pay for the same known-too-small
             # output budget again before reaching its successful checkpoint.
             with self.usage_lock:
                 self.limit_hits += 1
                 self.calls.append({"phase": phase, "checkpoint": path.stem, "limitCached": True})
-            kind = read_json(limit_path).get("kind") if limit_path.exists() else "output_limit"
-            raise InputContextLimit() if kind == "provider_context_limit" else ResponseOutputLimit()
+            if cached_kind is None and str(self.config.get("summaryVersion", "")).startswith("dialogue-reader-"):
+                raise ReasoningOutputExhausted("历史记录显示输出额度耗尽，但中断前未记录结果类型，无法确认是否包含正文。已保留原稿和用量，保守停止自动拆分；请检查模型预算后继续。")
+            raise InputContextLimit() if cached_kind == "provider_context_limit" else ResponseOutputLimit()
         feedback = ""
         for validation_attempt in range(2):
             body = {"model": self.config["model"], "stream": False, "max_tokens": output_tokens,
@@ -159,6 +172,10 @@ class ChatClient:
             normalized_usage = normalize_usage(result.get("usage"))
             choices = result.get("choices") or []
             choice = choices[0] if choices else {}
+            message = choice.get("message") or {}
+            final_text = message.get("content") if isinstance(message, dict) else None
+            empty_final = final_text is None or (isinstance(final_text, str) and not final_text.strip())
+            limit_kind = ("no_final_output" if empty_final else "output_limit") if choice.get("finish_reason") == "length" else None
             # Record metering, not keys, headers or reasoning text.
             log = self.directory / "usage.jsonl"
             log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -169,6 +186,8 @@ class ChatClient:
                     entry = {"time": time.time(), "step": path.stem, "usage": usage,
                              "finish_reason": choice.get("finish_reason"), "modelID": self.config["model"], "reasoningEffort": self.reasoning_effort,
                              "phase": phase, "durationSeconds": round(time.monotonic() - started, 3)}
+                    if limit_kind:
+                        entry.update(limitKind=limit_kind, noFinalOutput=empty_final)
                     if result.get("_videohelper_event_id"):
                         entry["eventID"] = result["_videohelper_event_id"]
                     for key in ("providerID", "providerName", "modelConfigID", "modelName", "pricing"):
@@ -180,13 +199,13 @@ class ChatClient:
                     elif self.config.get("taskID"):
                         entry["sourceKind"] = "bilibili"
                     file.write(encoded(entry) + "\n")
+                if limit_kind:
+                    self.known_output_limits.add(path.stem)
+                    self.known_limit_kinds[path.stem] = limit_kind
                 self.calls.append({"phase": phase, "checkpoint": path.stem, "cached": False, "reasoningEffort": self.reasoning_effort,
                                    "usage": normalized_usage, "durationSeconds": entry["durationSeconds"]})
             if not choices:
                 raise UserError("模型没有返回结果。原稿和已完成分段已保存。")
-            message = choice.get("message") or {}
-            final_text = message.get("content") if isinstance(message, dict) else None
-            empty_final = final_text is None or (isinstance(final_text, str) and not final_text.strip())
             if choice.get("finish_reason") == "length":
                 if empty_final:
                     write_json(limit_path, {"kind": "no_final_output"})
