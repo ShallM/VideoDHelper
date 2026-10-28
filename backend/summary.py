@@ -207,7 +207,11 @@ class ChatClient:
                 headers["Authorization"] = "Bearer " + self.config["apiKey"].strip()
             request = urllib.request.Request(self.endpoint, data=encoded(body).encode(), headers=headers)
             try:
-                with opener.open(request, timeout=150) as response:
+                # High reasoning can spend several minutes before returning a
+                # non-streaming answer. Respect the run deadline as well.
+                remaining = self.config.get("summaryTimeoutSeconds", 14400) - (time.monotonic() - self.started)
+                timeout = min(600 if self.reasoning_effort in ("high", "max") else 150, max(1, remaining))
+                with opener.open(request, timeout=timeout) as response:
                     raw = response.read(8 * 1024 * 1024 + 1)
                 if len(raw) > 8 * 1024 * 1024:
                     self.ledger.finish(event, "invalid_response", http_status=200)
@@ -240,8 +244,15 @@ class ChatClient:
                 labels = {401: "API Key 无效或已过期", 403: "模型权限不足或额度已用完", 404: "模型名称或 API 地址不正确",
                           429: "请求频率受限", 400: "接口不接受请求参数；可在设置中改用默认推理强度"}
                 raise UserError(f"{labels.get(error.code, '模型接口请求失败')}（HTTP {error.code}）。已保存原稿和完成的分段。") from None
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            except (KeyboardInterrupt, SystemExit):
+                self.ledger.finish(event, "cancelled")
+                raise
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
                 self.ledger.finish(event, "network_error")
+                if isinstance(error, TimeoutError) or (isinstance(error, urllib.error.URLError) and isinstance(error.reason, TimeoutError)):
+                    # The server may still be generating and charging for this
+                    # POST. Retrying automatically would duplicate paid work.
+                    raise UserError("模型响应超时，未自动重复提交。服务端可能仍在处理，用量未知；已保存原稿与完成阶段，可稍后继续，或调整思考强度。") from None
                 if attempt < 2:
                     self.emit("summary", "连接中断，正在重试模型请求…")
                     time.sleep(2 ** (attempt + 1))

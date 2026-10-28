@@ -12,7 +12,7 @@ import uuid
 from common import UserError, clean_media, read_json, save_transcript, validate_segments, write_json
 from media import owned_words
 from recording import (align_speakers, effective_transcript, prepare_transcript, source_file,
-                       validate_turns, speaker_at, invoke_helper, SPEAKERS)
+                       validate_turns, speaker_at, invoke_helper, export_dialogue, SPEAKERS)
 from summary import ChatClient
 from summary_v2 import (DIALOGUE_VERSION, paragraphs, pids, source_text, summarize,
                         validate_condensed, validate_whole)
@@ -159,6 +159,19 @@ class RecordingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_condensed([{"first": i, "last": i, "text": r["text"], "speaker": "B"} for i, r in enumerate(rows)], rows)
         validate_condensed([{"first": i, "last": i, "text": r["text"], "speaker": r["speaker"]} for i, r in enumerate(rows)], rows)
+
+    def test_saved_markdown_uses_display_names_in_titles_and_body(self):
+        notes = {"model": "test", "overview": "[A]提问，[B]保留条件。", "chapters": [
+            {"title": "[B]的答复", "claims": [{"text": "[B]尚未承诺。", "source_ids": [1]}]}],
+            "key_points": [{"text": "[A]的提问未获无条件确认。", "source_ids": [0, 1]}], "uncertainties": []}
+        export_dialogue(self.folder, "测试", dialogue(), {**SPEAKERS, "A": "张老师", "B": "李同学"}, notes,
+                        [{"text": "[B]保留测试条件。", "speaker": "B", "source_ids": [1]}])
+        markdown = (self.folder / "study-notes.md").read_text()
+        self.assertIn("## 李同学的答复", markdown)
+        self.assertIn("李同学尚未承诺。", markdown)
+        self.assertNotIn("[A]", markdown)
+        self.assertNotIn("[B]", markdown)
+        self.assertIn("李同学：李同学保留测试条件。", (self.folder / "condensed.md").read_text())
 
     def test_citation_sorting_preserves_text_ranges_and_is_saved_without_repair_call(self):
         rows = [{"id": i, "source_ids": [i], "start": i * 6., "end": i * 6. + 5.,

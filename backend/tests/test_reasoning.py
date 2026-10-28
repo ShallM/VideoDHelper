@@ -118,6 +118,49 @@ class ReasoningTests(unittest.TestCase):
         body = json.loads(opener.open.call_args.args[0].data)
         self.assertEqual(body["reasoning_effort"], "max")
 
+    def test_high_reasoning_waits_longer_but_timeout_is_never_automatically_retried(self):
+        for effort, timeout in (("low", 150), ("high", 600), ("max", 600)):
+            with self.subTest(effort=effort):
+                client = self.client(effort, usageRoot=str(self.folder / effort))
+                opener = Mock()
+                opener.open.side_effect = TimeoutError("upstream still generating")
+                with patch("summary.urllib.request.build_opener", return_value=opener), patch("summary.time.sleep") as sleep:
+                    with self.assertRaisesRegex(UserError, "未自动重复提交"):
+                        client.complete("prompt", {}, self.validate)
+                self.assertEqual(opener.open.call_count, 1)
+                self.assertEqual(opener.open.call_args.kwargs["timeout"], timeout)
+                sleep.assert_not_called()
+                events = list((self.folder / effort / "usage/events").glob("*.json"))
+                self.assertEqual(len(events), 1)
+                event = json.loads(events[0].read_text())
+                self.assertEqual(event["status"], "network_error")
+                self.assertNotIn("inputTokens", event["usage"])
+
+    def test_wrapped_timeout_and_remaining_run_budget(self):
+        client = self.client("high", summaryTimeoutSeconds=30)
+        opener = Mock()
+        opener.open.side_effect = urllib.error.URLError(TimeoutError("timed out"))
+        with patch("summary.urllib.request.build_opener", return_value=opener):
+            with self.assertRaisesRegex(UserError, "未自动重复提交"):
+                client.complete("prompt", {}, self.validate)
+        self.assertEqual(opener.open.call_count, 1)
+        self.assertGreater(opener.open.call_args.kwargs["timeout"], 0)
+        self.assertLessEqual(opener.open.call_args.kwargs["timeout"], 30)
+
+    def test_cancelled_request_is_metered_as_unknown_without_retry(self):
+        client = self.client("high", usageRoot=str(self.folder / "cancelled"))
+        opener = Mock()
+        opener.open.side_effect = KeyboardInterrupt()
+        with patch("summary.urllib.request.build_opener", return_value=opener):
+            with self.assertRaises(KeyboardInterrupt):
+                client.complete("prompt", {}, self.validate)
+        self.assertEqual(opener.open.call_count, 1)
+        events = list((self.folder / "cancelled/usage/events").glob("*.json"))
+        self.assertEqual(len(events), 1)
+        event = json.loads(events[0].read_text())
+        self.assertEqual(event["status"], "cancelled")
+        self.assertNotIn("outputTokens", event["usage"])
+
 
 if __name__ == "__main__":
     unittest.main()

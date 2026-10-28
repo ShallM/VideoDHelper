@@ -286,7 +286,7 @@ def export_dialogue(folder, title, segments, names, notes=None, condensed=None):
     if notes is None: return
     lines = [f"# {title}", "来源：本地录音", f"整理模型：{notes['model']}", "## 对话概览", display_text(notes["overview"], names)]
     for chapter in notes["chapters"]:
-        lines += [f"## {chapter['title']}"]
+        lines += [f"## {display_text(chapter['title'], names)}"]
         for claim in chapter.get("claims", []):
             lines += [display_text(claim["text"], names), f"录音时间：{refs(claim['source_ids'])}"]
     for label, key in (("主要观点与共识", "key_points"), ("分歧与待核对", "uncertainties")):
