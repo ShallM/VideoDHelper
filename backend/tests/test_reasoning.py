@@ -63,6 +63,18 @@ class ReasoningTests(unittest.TestCase):
         self.assertEqual(request.call_args.args[0]["reasoning_effort"], "low")
         self.assertEqual(reasoning_effort({"model": "deepseek-v4.1-flash", "reasoningEffort": "default"}), "default")
 
+    def test_explicit_json_mode_has_its_own_cache_and_preserves_reasoning_strength(self):
+        for enabled in (False, True):
+            client = self.client("high", jsonObjectMode=enabled)
+            with patch.object(client, "_request", return_value=self.response()) as request:
+                client.complete("JSON", {}, self.validate)
+                self.assertEqual(request.call_count, 1)
+                body = request.call_args.args[0]
+                self.assertEqual(body["reasoning_effort"], "high")
+                self.assertEqual(body.get("response_format"), {"type": "json_object"} if enabled else None)
+                client.complete("JSON", {}, self.validate)
+                self.assertEqual(request.call_count, 1)
+
     def test_invalid_or_misleading_deepseek_levels_fail_before_network(self):
         for effort in ("bad", "ultra", "", True, 4):
             with self.assertRaises(UserError):

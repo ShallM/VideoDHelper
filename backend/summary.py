@@ -110,6 +110,8 @@ class ChatClient:
                     "effort": self.reasoning_effort, "prompt": prompt, "payload": payload}
         if self.config.get("summaryVersion"):
             identity["output_tokens"] = output_tokens
+        if self.config.get("jsonObjectMode") is True:
+            identity["responseFormat"] = "json_object"
         phase = phase or ("chunk" if prompt.startswith(CHUNK_PROMPT) else "reduce" if prompt.startswith(REDUCE_PROMPT) else "stitch" if prompt.startswith(MERGE_PROMPT) else "overview")
         path = self.directory / (digest(identity) + ".json")
         limit_path = self.directory / "limits" / path.name
@@ -142,6 +144,8 @@ class ChatClient:
                     "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": encoded(payload)}]}
             if self.reasoning_effort != "default":
                 body["reasoning_effort"] = self.reasoning_effort
+            if self.config.get("jsonObjectMode") is True:
+                body["response_format"] = {"type": "json_object"}
             if validation_attempt:
                 body["messages"][0]["content"] += " 上次结构或来源检查未通过，请严格满足JSON字段及来源编号约束。" + feedback
             started = time.monotonic()

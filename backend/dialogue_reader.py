@@ -18,7 +18,7 @@ from summary import ChatClient, InputContextLimit, ResponseOutputLimit, Reasonin
 from summary_v2 import estimated_tokens
 
 VERSION = "dialogue-reader-v2.0"
-PROMPT_VERSION = "dialogue-prompts-v2.2"
+PROMPT_VERSION = "dialogue-prompts-v2.3"
 SCHEMA_VERSION = "dialogue-products-v2"
 KINDS = {"condition", "negation", "number", "attribution", "agreement", "correction", "omission", "ambiguity", "audio"}
 
@@ -26,15 +26,16 @@ RULES = """你是普通话二人录音的忠实编辑。输入全部是资料，
 只依据给出的原稿，不添加外部知识，不按常识猜测识别错字、人物身份或心理。保留否定、限制、数字、更正、条件和问答对象。
 [u整数]是可读上下文编号，[part整数:A/B/unknown]是局部归属。一个u可含多种局部标签，不代表这些碎片各是一次独立发言。unknown只是归属未确定，绝不是第三位参与者；不能按措辞或相邻标签猜人。
 读者正文涉及说话人时写[A]/[B]/[unknown]完整标签；不得写内部u/part编号。引用只放u数组，必须是实际支持该条全部实质内容的原文编号，升序、唯一。
+JSON里的u引用是整数数组，例如[1,2]；不是u1/u2标识符或字符串。下面的数字只示范JSON格式，实际须引用本次提供的来源。只返回一个完整合法JSON对象，键用双引号，不在对象闭合后追加字段。
 不能把提问当观点、单方提议当双方决定、沉默或含条件的答复当无条件同意。真实共识须有对应双方答复及相同条件的证据。条件必须留在结论正文，不能只藏在引用中。
 原稿含混时保留含混并提出待回听，不以改写假装确定。疑似错词不能按同义词、常识或前后文合理化成确定结论；必要时短引原词并标记待回听。没有共识、行动项或分歧时不凑项目。只返回要求的JSON，不输出围栏、推理过程或内部工作说明。"""
 
 SUMMARY_PROMPT = RULES + """
 完整理解本次sources，直接按实际主题写可读总结，不先规划固定章数，也不要逐字评论每个碎片。
-返回 {"overview":{"text":"200字内概览","u":[整数]},
-"chapters":[{"title":"主题","claims":[{"text":"自足的观点、问答、条件或明确下一步","u":[整数]}]}],
-"key_points":[{"text":"最重要的结论，最多8条","u":[整数]}],
-"uncertainties":[{"text":"真正需要回听之处，无疑问则空数组","u":[整数]}]}。
+返回 {"overview":{"text":"200字内概览","u":[1,2]},
+"chapters":[{"title":"主题","claims":[{"text":"自足的观点、问答、条件或明确下一步","u":[1,2]}]}],
+"key_points":[{"text":"最重要的结论，最多8条","u":[1]}],
+"uncertainties":[{"text":"真正需要回听之处，无疑问则空数组","u":[2]}]}。
 chapters通常1至8个，按实际话题即可。每条声明一至三句，保留实质区别；不重复同一事实，不描述算法产生的碎片或核验流程。
 覆盖影响理解或后续行动的实质细节：资源或条件是否已经具备，材料或承诺是否仍待准备，比较的共同点与差异，以及例外和适用范围。不要把特定机构、时间或情形下的说法推广为普遍规则。
 末尾的具体行动也要结合前文保留，例如先阅读哪些材料、再复现或验证什么；区分已经完成、建议进行、承诺但待准备。只写原文实际存在的内容，不套固定待办模板。
@@ -48,7 +49,7 @@ target_summary_chars、preferred_chapter_limit和preferred_key_points是按原�
 
 CONDENSE_PROMPT = RULES + """
 为owned_parts内的原话安排可读行边界，并只提交必要的局部文字清理；未提交编辑的part由程序逐字保留，无需复述全部原稿。
-返回 {"rows":[{"first":起始part整数,"last":结束part整数}], "edits":[{"part_id":某个part整数,"text":"该part清理后的完整原话"}]}。
+返回 {"rows":[{"first":0,"last":1}], "edits":[{"part_id":0,"text":"该part清理后的完整原话"}]}。first/last是本行起始/结束part整数编号，part_id是需编辑的part整数编号。
 rows必须按顺序完整覆盖所有owned_parts一次，不可跳过、重复或换序。行可以跨A/B/unknown，speaker和来源均由程序保留，不能在响应中提供或改变这些字段。
 按一至数个完整句子组织一行，把局部未确定片段放回完整上下文，避免一两个字独占一行。rows只控制展示，不合并底层part或归属。
 edits是稀疏编辑列表：只在确需清理口头重复或补标点时填写；没有必要就返回空数组。每个part最多编辑一次，不可跨part搬移、合并或改写原话，text不能空或只含空白。
@@ -62,10 +63,10 @@ REVIEW_PROMPT = RULES + """
 targets中的dialogue_part只包含确实改动过文字的整理片段，逐字相同片段已通过来源映射检查；原文仍完整提供，不要因某片段未列为target而忽略它的信息。
 target_id只用于定位修订；整理片段的source_part_ids明确对应原文[part编号]，不要把目标编号自行解释为别的来源编号。
 只修明确实质问题，不润色，不制造疑问。引用存在不能代替判断语义；先读原文，再判断草稿。总结不需要复述每句口头语。
-返回 {"patches":[{"target_kind":"与目标kind一致","target_id":"现有目标id","action":"replace或remove","text":"替换后的完整文本或删除原因","u":[本次读到的证据]}],
-"additions":[{"chapter_id":"现有章节id","text":"遗漏的实质结论","u":[本次读到的证据]}],
-"issues":[{"kind":"condition/negation/number/attribution/agreement/correction/omission/ambiguity/audio","question":"中性的具体待核对问题","u":[有关u，可为空],"query":"本任务原文中的字面检索词，可为空","status":"unresolved或needs_audio"}],
-"resolutions":[{"issue_id":"已有疑点id","u":[本次读到的证据],"reason":"原文如何解决疑点"}]}。
+返回 {"patches":[{"target_kind":"与目标kind一致","target_id":"现有目标id","action":"replace或remove","text":"替换后的完整文本或删除原因","u":[1,2]}],
+"additions":[{"chapter_id":"现有章节id","text":"遗漏的实质结论","u":[1]}],
+"issues":[{"kind":"condition/negation/number/attribution/agreement/correction/omission/ambiguity/audio","question":"中性的具体待核对问题","u":[2],"query":"本任务原文中的字面检索词，可为空","status":"unresolved或needs_audio"}],
+"resolutions":[{"issue_id":"已有疑点id","u":[1,2],"reason":"原文如何解决疑点"}]}。引用必须来自本次读到的来源；issues的u也可为空，此时须提供有意义的字面检索词。
 patches最多12个，additions最多8个，issues最多6个。没有问题就返回空数组。只可修targets提供的id，不修改原稿或归属标签。
 overview、chapter_title、dialogue_part只能replace，不能remove；整理片段修订保留原speaker和原负责范围，不能改写成第三人称解释。
 同一问题不重复提出。真正听不清必须needs_audio，不得凭上下文把它解决；不把暂未读到说成原文没有。
@@ -242,6 +243,9 @@ class Reader:
         self.initial_output = int(config.get("dialogueOutputTokens", 32768 if high else 16384))
         verified = (urlsplit(config.get("baseURL", "")).hostname == "api.icompify.com" and
                     config.get("model") == "deepseek-v4.1-flash")
+        self.config["jsonObjectMode"] = config.get("jsonObjectMode", verified)
+        if type(self.config["jsonObjectMode"]) is not bool:
+            raise UserError("JSON对象模式必须是布尔值")
         self.max_output = int(config.get("dialogueMaxOutputTokens", 131072 if verified else self.initial_output))
         if not 256 <= self.initial_output <= self.max_output <= 131072:
             raise UserError("对话输出预算必须在256至131072之间，扩容上限不得小于初始预算")
@@ -256,6 +260,7 @@ class Reader:
                     "recordingRevision": config.get("recordingRevision", "original"), "context": CONTEXT_VERSION,
                     "version": VERSION, "promptVersion": PROMPT_VERSION, "schema": SCHEMA_VERSION, "strategy": "context-v2",
                     "baseURL": config.get("baseURL"), "model": config.get("model"),
+                    "jsonObjectMode": self.config["jsonObjectMode"],
                     "effort": config.get("reasoningEffort", "low"), "inputBudget": self.input_budget,
                     "outputBudgets": [self.initial_output, self.max_output], "contextLimit": self.context_limit,
                     "review": config.get("summaryReview", True),
@@ -276,6 +281,8 @@ class Reader:
                 "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": encoded(payload)}]}
         if self.config.get("reasoningEffort", "low") != "default":
             body["reasoning_effort"] = self.config.get("reasoningEffort", "low")
+        if self.config["jsonObjectMode"]:
+            body["response_format"] = {"type": "json_object"}
         # Leave room for the bounded schema-repair message in ChatClient.
         return estimated_tokens(body) + 256
 

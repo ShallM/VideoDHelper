@@ -114,6 +114,19 @@ class DialogueTests(unittest.TestCase):
         self.assertEqual(a.identity, self.reader(segments, beforePublish=lambda: None).identity)
         self.assertEqual(a.identity, self.reader(segments, dialogueMaxRereads=0).identity)
 
+    def test_json_object_mode_is_opt_in_except_verified_provider_model(self):
+        regular = self.reader()
+        self.assertFalse(regular.config["jsonObjectMode"])
+        verified = self.reader(baseURL="https://api.icompify.com/v1", model="deepseek-v4.1-flash")
+        self.assertTrue(verified.config["jsonObjectMode"])
+        opted_out = self.reader(baseURL="https://api.icompify.com/v1", model="deepseek-v4.1-flash", jsonObjectMode=False)
+        self.assertFalse(opted_out.config["jsonObjectMode"])
+        self.assertNotEqual(verified.identity, opted_out.identity)
+        self.assertFalse(self.reader(baseURL="https://api.icompify.com/v1", model="other-model").config["jsonObjectMode"])
+        enabled = self.reader(jsonObjectMode=True)
+        self.assertGreater(enabled.request_size(SUMMARY_PROMPT, {}), regular.request_size(SUMMARY_PROMPT, {}))
+        with self.assertRaises(UserError): self.reader(jsonObjectMode="true")
+
     def test_schema_disallows_unknown_guess_coverage_loss_and_output_bloat(self):
         units = build_context(transcript())
         good = condensed_value(units)
