@@ -132,6 +132,7 @@ flowchart LR
 | [安装与升级](docs/installing.md) | DMG、首次打开、数据位置与校验和 |
 | [使用指南](docs/user-guide.md) | 登录、下载选择、三种文字、项目、恢复与导出 |
 | [录音整理（0.7.0 开发预览）](docs/recordings.md) | 两人录音、本地分人、人工校订、对话总结与恢复 |
+| [下一轮文字理解方案（尚未实现）](docs/dialogue-understanding-design-2026-10-28.md) | 开源产品调研、全文总结与整理稿分离、原文核验及有限回读 |
 | [构建与开发](docs/building.md) | 环境、构建、测试、CI 产物、常见问题 |
 | [版本日志](CHANGELOG.md) | 0.1 → 0.6 的功能和修复，以及 0.7.0 未发布改动 |
 | [开发记录](docs/development-log.md) | 关键取舍、验证结论与下一阶段 |
