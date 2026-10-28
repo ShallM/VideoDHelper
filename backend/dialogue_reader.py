@@ -18,6 +18,7 @@ from summary import ChatClient, InputContextLimit, ResponseOutputLimit, Reasonin
 from summary_v2 import estimated_tokens
 
 VERSION = "dialogue-reader-v2.0"
+PROMPT_VERSION = "dialogue-prompts-v2.2"
 SCHEMA_VERSION = "dialogue-products-v2"
 KINDS = {"condition", "negation", "number", "attribution", "agreement", "correction", "omission", "ambiguity", "audio"}
 
@@ -35,6 +36,9 @@ SUMMARY_PROMPT = RULES + """
 "key_points":[{"text":"最重要的结论，最多8条","u":[整数]}],
 "uncertainties":[{"text":"真正需要回听之处，无疑问则空数组","u":[整数]}]}。
 chapters通常1至8个，按实际话题即可。每条声明一至三句，保留实质区别；不重复同一事实，不描述算法产生的碎片或核验流程。
+覆盖影响理解或后续行动的实质细节：资源或条件是否已经具备，材料或承诺是否仍待准备，比较的共同点与差异，以及例外和适用范围。不要把特定机构、时间或情形下的说法推广为普遍规则。
+末尾的具体行动也要结合前文保留，例如先阅读哪些材料、再复现或验证什么；区分已经完成、建议进行、承诺但待准备。只写原文实际存在的内容，不套固定待办模板。
+key_points优先提炼有证据的下一步、先后顺序与前提；没有独立价值时留空，不再重复章节主题。
 sources是权威；若有partial_summaries，它们只是其他已读范围的候选笔记，不能冒充原文；只组织已有带来源声明，不补事实。
 此调用只写主题总结，不输出顺序整理对话。每条引用最多12个u，引用支持该条的最小充分范围，不为凑覆盖引用无关段。"""
 SUMMARY_PROMPT += """
@@ -43,15 +47,20 @@ target_summary_chars、preferred_chapter_limit和preferred_key_points是按原�
 """
 
 CONDENSE_PROMPT = RULES + """
-只整理owned_parts内的原话，保留顺序、第一/第二人称、问句、语气、否定和条件，不写第三人称旁白或主题摘要。
-返回 {"rows":[{"parts":[{"first":起始part整数,"last":结束part整数,"speaker":"A或B或unknown","text":"清理重复后的原话"}]}]}。
-所有owned_parts必须按顺序恰好覆盖一次。first/last范围里的局部归属必须一致，不可跨A/B/unknown合成一个part。
-一行rows可有多个不同speaker的parts，把局部未确定片段放回完整上下文，避免一两个字独占一行；每行按一至数个完整句子组织。
-只删除口头重复，不扩写、不补齐听不清的词；只有一两个字或短答时保留其原字。每个part的text非空。整体文字应短于或接近原稿，不增加解释。
-context只供理解，不能输出owned_parts以外内容。不要输出行级speaker，由程序保留局部归属。"""
+为owned_parts内的原话安排可读行边界，并只提交必要的局部文字清理；未提交编辑的part由程序逐字保留，无需复述全部原稿。
+返回 {"rows":[{"first":起始part整数,"last":结束part整数}], "edits":[{"part_id":某个part整数,"text":"该part清理后的完整原话"}]}。
+rows必须按顺序完整覆盖所有owned_parts一次，不可跳过、重复或换序。行可以跨A/B/unknown，speaker和来源均由程序保留，不能在响应中提供或改变这些字段。
+按一至数个完整句子组织一行，把局部未确定片段放回完整上下文，避免一两个字独占一行。rows只控制展示，不合并底层part或归属。
+edits是稀疏编辑列表：只在确需清理口头重复或补标点时填写；没有必要就返回空数组。每个part最多编辑一次，不可跨part搬移、合并或改写原话，text不能空或只含空白。
+保留第一/第二人称、问句、语气、否定和条件，不写第三人称旁白或主题摘要。只有一两个字或短答时保留全部原字符，只能插入标点；不得删掉局部残字或猜测补词。
+不要扩写、不补齐听不清的词，整体正文应短于或接近原稿，不增加解释。context只供理解，rows与edits不能使用owned_parts以外的part。"""
 
 REVIEW_PROMPT = RULES + """
 进行一轮双向核验：(1)从owned_sources原文检查重要条件、否定、归属、数字、更正、问答和下一步是否遗漏；(2)检查targets中总结及整理原话是否被来源支持。
+以原文每个owned_sources单元的实质条件、资源是否具备、待准备承诺、比较与例外、具体待办为检查主线；特别检查收尾行动是否被概览话题掩盖。无需罗列无实质信息的口头语。
+判断声明有原文支持时，必须同时保留原话的机构、时间、对象和适用条件；举例、局部规定或特定情形不能改成普遍结论。新增补丁与补充声明同样遵守这个要求。
+targets中的dialogue_part只包含确实改动过文字的整理片段，逐字相同片段已通过来源映射检查；原文仍完整提供，不要因某片段未列为target而忽略它的信息。
+target_id只用于定位修订；整理片段的source_part_ids明确对应原文[part编号]，不要把目标编号自行解释为别的来源编号。
 只修明确实质问题，不润色，不制造疑问。引用存在不能代替判断语义；先读原文，再判断草稿。总结不需要复述每句口头语。
 返回 {"patches":[{"target_kind":"与目标kind一致","target_id":"现有目标id","action":"replace或remove","text":"替换后的完整文本或删除原因","u":[本次读到的证据]}],
 "additions":[{"chapter_id":"现有章节id","text":"遗漏的实质结论","u":[本次读到的证据]}],
@@ -158,6 +167,47 @@ def validate_condensed(value, units):
         raise ValueError("整理对话整体显著扩写，请只保留清理后的原话")
 
 
+def project_condensed(value, units):
+    """Expand a validated sparse response; ownership never comes from the LLM."""
+    originals = {p["id"]: p for u in units for p in u["parts"]}
+    edits = {e["part_id"]: e["text"] for e in value["edits"]}
+    return {"rows": [{"parts": [{"first": i, "last": i, "speaker": originals[i]["speaker"],
+                                 "text": edits.get(i, originals[i]["text"])}
+                                for i in range(row["first"], row["last"] + 1)]}
+                     for row in value["rows"]]}
+
+
+def validate_sparse_condensed(value, units):
+    originals = {p["id"]: p for u in units for p in u["parts"]}
+    expected = list(originals)
+    if set(value) != {"rows", "edits"} or not isinstance(value["rows"], list) or not value["rows"]:
+        raise ValueError("整理响应只能包含非空rows和稀疏edits")
+    covered = []
+    for row in value["rows"]:
+        if not isinstance(row, dict) or set(row) != {"first", "last"}:
+            raise ValueError("行只指定first/last，不能改写说话人或来源")
+        first, last = row["first"], row["last"]
+        if (type(first) is not int or type(last) is not int or first > last or
+                first not in originals or last not in originals or last - first + 1 > len(originals)):
+            raise ValueError("整理行范围超出本批负责的part")
+        covered.extend(range(first, last + 1))
+    if covered != expected:
+        raise ValueError("行边界必须按顺序完整覆盖每个负责part一次")
+    if not isinstance(value["edits"], list) or len(value["edits"]) > len(originals):
+        raise ValueError("稀疏编辑列表无效")
+    seen = set()
+    for edit in value["edits"]:
+        if not isinstance(edit, dict) or set(edit) != {"part_id", "text"}:
+            raise ValueError("编辑只允许part_id和text，不能修改归属")
+        identifier = edit["part_id"]
+        if type(identifier) is not int or identifier not in originals or identifier in seen:
+            raise ValueError("编辑编号不属于本批负责范围或重复")
+        seen.add(identifier)
+        _part_text_limit(edit["text"], [originals[identifier]])
+    # Keep the same final coverage, attribution and total expansion invariants.
+    validate_condensed(project_condensed(value, units), units)
+
+
 def condensed_batches(units, max_parts=120):
     """Bound output records, without shortening the summary's reading context."""
     groups, current, count = [], [], 0
@@ -204,7 +254,7 @@ class Reader:
         identity = {"source": digest(segments), "sourceRevision": config.get("sourceRevision"),
                     "transcriptIdentity": config.get("transcriptIdentity"), "diarizationIdentity": config.get("diarizationIdentity"),
                     "recordingRevision": config.get("recordingRevision", "original"), "context": CONTEXT_VERSION,
-                    "version": VERSION, "schema": SCHEMA_VERSION, "strategy": "context-v2",
+                    "version": VERSION, "promptVersion": PROMPT_VERSION, "schema": SCHEMA_VERSION, "strategy": "context-v2",
                     "baseURL": config.get("baseURL"), "model": config.get("model"),
                     "effort": config.get("reasoningEffort", "low"), "inputBudget": self.input_budget,
                     "outputBudgets": [self.initial_output, self.max_output], "contextLimit": self.context_limit,
@@ -286,7 +336,11 @@ class Reader:
         if depth == 0:
             groups = condensed_batches(units)
             if len(groups) > 1:
-                return [row for group in groups for row in self.condense(group, depth=1)]
+                rows = []
+                for index, group in enumerate(groups):
+                    self.emit("condense", f"整理对话 · 第 {index + 1}/{len(groups)} 批；原文与局部归属保持可追查…", index / len(groups))
+                    rows.extend(self.condense(group, depth=1))
+                return rows
         part_ids = [p["id"] for u in units for p in u["parts"]]
         payload = {"title": self.title, "owned_parts": part_ids, "sources": source_text(units)}
         if depth:
@@ -296,9 +350,9 @@ class Reader:
                           if u["id"] not in owned_ids or any(p["id"] not in owned_parts for p in u["parts"])]
             payload["context"] = source_text(neighbours)
         try:
-            value = self.call(CONDENSE_PROMPT, payload, lambda v: validate_condensed(v, units), "dialogue_condense")
+            value = self.call(CONDENSE_PROMPT, payload, lambda v: validate_sparse_condensed(v, units), "dialogue_condense")
             self.condense_batches += 1
-            return value["rows"]
+            return project_condensed(value, units)["rows"]
         except InputContextLimit:
             if len(units) == 1 or depth >= 12:
                 raise UserError("整理稿的完整阅读单元超过输入容量，未截断原稿") from None
@@ -321,17 +375,15 @@ class Reader:
         for field, prefix in (("key_points", "key"), ("uncertainties", "uncertainty")):
             for i, item in enumerate(self.document[field]):
                 item["id"] = f"{prefix}-{i}"
-        number = 0
         for i, row in enumerate(rows):
             parts = []
             for part in row["parts"]:
                 ids = list(range(part["first"], part["last"] + 1))
-                parts.append({"id": f"dialogue-part-{number}", "text": part["text"], "speaker": part["speaker"],
+                parts.append({"id": f"dialogue-part-{ids[0]}", "text": part["text"], "speaker": part["speaker"],
                               "part_ids": ids, "u": sorted({self.part_units[p] for p in ids})})
-                number += 1
             self.dialogue.append({"id": f"dialogue-{i}", "parts": parts})
 
-    def targets(self):
+    def targets(self, include_unchanged=False):
         result = {"overview": {**self.document["overview"], "kind": "overview"}}
         for chapter in self.document["chapters"]:
             if chapter["claims"]:
@@ -344,7 +396,13 @@ class Reader:
                 result[item["id"]] = {**item, "kind": kind}
         for row in self.dialogue:
             for part in row["parts"]:
-                result[part["id"]] = {k: v for k, v in {**part, "kind": "dialogue_part"}.items() if k != "part_ids"}
+                original = "".join(self.parts[i]["text"] for i in part["part_ids"])
+                # Exact equality only: punctuation, whitespace and case edits
+                # still receive semantic review. Source coverage is unchanged.
+                if not include_unchanged and part["text"] == original:
+                    continue
+                result[part["id"]] = {k: v for k, v in {**part, "kind": "dialogue_part",
+                                      "source_part_ids": part["part_ids"]}.items() if k != "part_ids"}
         return result
 
     def validate_review(self, value, allowed, targets):
@@ -542,6 +600,7 @@ class Reader:
                  "overviewSourceIDs": cited(self.document["overview"])["source_ids"],
                  "model": self.config["model"], "tokensThisRun": self.client.total_tokens,
                  "summaryStrategy": "context-v2", "summaryRoute": self.route, "summaryVersion": VERSION,
+                 "summaryPromptVersion": PROMPT_VERSION,
                  "reviewedParagraphs": len(self.reviewed), "paragraphCount": len(self.units), "rereadCount": self.reread_count,
                  "sourceKind": "recording", "sourceRevision": self.source_revision,
                  "recordingRevision": self.config.get("recordingRevision", "original")}
@@ -591,6 +650,7 @@ class Reader:
             write_json(self.folder / "dialogue-review.json", {"identity": self.identity, "issues": list(self.issues.values()),
                        "patches": self.patch_log, "reviewedUnits": sorted(self.reviewed), "rereadCount": self.reread_count})
             write_json(self.folder / "summary-run.json", {"version": VERSION, "strategy": "context-v2", "route": self.route,
+                       "promptVersion": PROMPT_VERSION,
                        "completed": complete, "published": published, "elapsedSeconds": round(time.monotonic() - self.started, 3),
                        "requests": self.client.request_count, "checkpointHits": self.client.cache_hits,
                        "limitCheckpointHits": self.client.limit_hits, "tokensThisRun": self.client.total_tokens,

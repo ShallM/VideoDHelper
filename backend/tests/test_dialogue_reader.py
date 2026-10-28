@@ -9,7 +9,8 @@ from unittest.mock import patch
 from common import UserError, read_json, write_json
 from dialogue_context import build_context
 from dialogue_reader import (Reader, SUMMARY_PROMPT, condensed_batches, summarize,
-                             validate_condensed, validate_summary, _part_text_limit)
+                             validate_condensed, validate_summary, _part_text_limit,
+                             validate_sparse_condensed, project_condensed)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit, ReasoningOutputExhausted
 
 
@@ -63,10 +64,7 @@ class DialogueTests(unittest.TestCase):
             ids = [int(v) for v in re.findall(r"\[u(\d+)\]", payload["sources"])] or payload["allowed_u"]
             value = summary_value([{"id": v} for v in ids])
         elif phase == "dialogue_condense":
-            parts = {int(i): (s, t) for i, s, t in re.findall(
-                r"\[part(\d+):([^\]]+)\](.*?)(?=\[part|\n\[u|\Z)", payload["sources"], re.S)}
-            value = {"rows": [{"parts": [{"first": i, "last": i, "speaker": parts[i][0], "text": parts[i][1]}
-                                        for i in payload["owned_parts"]]}]}
+            value = {"rows": [{"first": payload["owned_parts"][0], "last": payload["owned_parts"][-1]}], "edits": []}
         elif phase in ("dialogue_review", "dialogue_reread"):
             value = review()
         else:
@@ -132,6 +130,54 @@ class DialogueTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 validate_condensed(bad, units)
 
+    def test_sparse_rows_derive_mixed_speakers_and_keep_unedited_characters(self):
+        segments = transcript()
+        units = build_context(segments)
+        value = {"rows": [{"first": 0, "last": 2}], "edits": [{"part_id": 1, "text": "嗯。"}]}
+        validate_sparse_condensed(value, units)
+        expanded = project_condensed(value, units)
+        parts = expanded["rows"][0]["parts"]
+        self.assertEqual([p["speaker"] for p in parts], ["A", "unknown", "B"])
+        self.assertEqual(parts[0]["text"], segments[0]["text"])
+        self.assertEqual(parts[2]["text"], segments[2]["text"])
+        self.assertIn("只有测试通过，才可以提交", parts[0]["text"])
+        engine = self.reader(segments)
+        engine.assign_ids(summary_value(units), expanded["rows"])
+        row = engine.outputs()[1][0]
+        self.assertNotIn("speaker", row)
+        self.assertEqual([p["speaker"] for p in row["parts"]], ["A", "unknown", "B"])
+        self.assertTrue(all(p["spans"] for p in row["parts"]))
+
+    def test_sparse_edits_reject_invalid_id_duplicates_and_lost_short_text(self):
+        units = build_context(transcript())
+        base = {"rows": [{"first": 0, "last": 2}], "edits": []}
+        bad_edits = [
+            [{"part_id": 9, "text": "其他片段"}],
+            [{"part_id": True, "text": "嗯"}],
+            [{"part_id": 1, "text": "嗯"}, {"part_id": 1, "text": "嗯。"}],
+            [{"part_id": 1, "text": ""}], [{"part_id": 1, "text": "  "}],
+            [{"part_id": 1, "text": "同意"}],
+            [{"part_id": 1, "text": "嗯", "speaker": "A"}],
+            [{"part_id": 0, "text": "额外解释" * 30}],
+        ]
+        for edits in bad_edits:
+            with self.subTest(edits=edits), self.assertRaises(ValueError):
+                validate_sparse_condensed({**base, "edits": edits}, units)
+        short = build_context([{"id": 0, "start": 0., "end": 1., "text": "了他", "speaker": "unknown"}])
+        with self.assertRaises(ValueError):
+            validate_sparse_condensed({"rows": [{"first": 0, "last": 0}], "edits": [{"part_id": 0, "text": "了"}]}, short)
+
+    def test_sparse_boundaries_cannot_skip_repeat_reorder_or_invent_ownership(self):
+        units = build_context(transcript())
+        invalid = [[], [{"first": 1, "last": 2}], [{"first": 0, "last": 1}],
+                   [{"first": 0, "last": 1}, {"first": 1, "last": 2}],
+                   [{"first": 1, "last": 2}, {"first": 0, "last": 0}],
+                   [{"first": 0, "last": 10 ** 30}], [{"first": False, "last": 2}],
+                   [{"first": 0, "last": 2, "speaker": "A"}]]
+        for rows in invalid:
+            with self.subTest(rows=rows), self.assertRaises(ValueError):
+                validate_sparse_condensed({"rows": rows, "edits": []}, units)
+
     def test_stable_targets_do_not_shift_and_patch_cannot_change_ownership(self):
         engine = self.prepared()
         value = review()
@@ -146,7 +192,7 @@ class DialogueTests(unittest.TestCase):
             bad = review()
             bad["patches"] = [{"target_kind": "dialogue_part", "target_id": "dialogue-part-1", "action": "replace", "text": "嗯", "u": [0], **extra}]
             with self.subTest(extra=extra), self.assertRaises(ValueError):
-                engine.validate_review(bad, {0}, engine.targets())
+                engine.validate_review(bad, {0}, engine.targets(include_unchanged=True))
 
     def test_patch_aggregate_growth_is_bounded(self):
         engine = self.prepared(transcript(30))
@@ -155,7 +201,7 @@ class DialogueTests(unittest.TestCase):
         value["patches"] = [{"target_kind": "dialogue_part", "target_id": p["id"], "action": "replace",
                              "text": p["text"] + "补充五个字呀！", "u": p["u"]} for p in candidates]
         with self.assertRaisesRegex(ValueError, "整体"):
-            engine.validate_review(value, set(engine.lookup), engine.targets())
+            engine.validate_review(value, set(engine.lookup), engine.targets(include_unchanged=True))
 
     def test_punctuation_is_not_expansion_but_short_source_cannot_lose_characters(self):
         raw = "先完成检查再确认金额如果结果有变化明天继续讨论" * 6
@@ -171,14 +217,33 @@ class DialogueTests(unittest.TestCase):
         update = review()
         update["patches"] = [{"target_kind": "dialogue_part", "target_id": "dialogue-part-0",
                               "action": "replace", "text": punctuated, "u": [0]}]
-        engine.validate_review(update, {0}, engine.targets())
+        engine.validate_review(update, {0}, engine.targets(include_unchanged=True))
         update["patches"][0]["text"] += "这里可以解释出未说过的额外道理" * 4
-        with self.assertRaises(ValueError): engine.validate_review(update, {0}, engine.targets())
+        with self.assertRaises(ValueError): engine.validate_review(update, {0}, engine.targets(include_unchanged=True))
         for original, changed in (("了他", "了，他。"), ("不我", "不，我"), ("好。", "好。！")):
             _part_text_limit(changed, [{"text": original}])
         for original, changed in (("了他", "了"), ("好。", "好"), ("你", "您"), ("好吗", "吗好"), (" 嗯", "嗯")):
             with self.subTest(original=original, changed=changed), self.assertRaises(ValueError):
                 _part_text_limit(changed, [{"text": original}])
+
+    def test_review_skips_only_exact_copy_parts_but_retains_full_source_and_summary(self):
+        engine = self.prepared()
+        originals = copy.deepcopy(engine.parts)
+        self.assertFalse(any(t["kind"] == "dialogue_part" for t in engine.targets().values()))
+        engine.dialogue[0]["parts"][0]["text"] += "。"
+        engine.dialogue[0]["parts"][1]["text"] += " "
+        targets = engine.targets()
+        self.assertIn("dialogue-part-0", targets)
+        self.assertIn("dialogue-part-1", targets)
+        self.assertNotIn("dialogue-part-2", targets)
+        self.assertIn("overview", targets)
+        self.assertIn("claim-0", targets)
+        self.assertIn("claim-1", targets)
+        payload, units, actual = engine.review_payload(engine.units, list(targets))
+        self.assertEqual(units, engine.units)
+        self.assertIn("[part2:B]" + originals[2]["text"], payload["sources"])
+        self.assertEqual(set(actual), set(targets))
+        self.assertEqual(engine.parts, originals)
 
     def test_output_exhaustion_expands_once_without_fragmenting_summary(self):
         for error in (ResponseOutputLimit, ReasoningOutputExhausted):
