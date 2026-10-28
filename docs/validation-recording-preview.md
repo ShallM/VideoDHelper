@@ -167,6 +167,6 @@ GUI 中可阅读或导出的测试成果不表示其已经通过完整云端语�
 
 代码通过 PR 等待审阅，合并、制作正式 DMG 与 GitHub Release 仍按项目流程等待用户确认。
 
-本次真实录音已跑通两档完整流程，但仍需更多有人工逐字参考的普通话样本核对短应答、重叠讲话、专名、否定与观点归属；还需改善整理稿精简程度、含混词解释和疑点去重。其他 M 系列芯片及 macOS 14 真机尚未验证。
+本次真实录音已跑通两档完整流程，但仍需更多有人工逐字参考的普通话样本核对短应答、重叠讲话、专名、否定与观点归属；还需改善整理稿精简程度、含混词解释和疑点去重。后续[内容质量复盘](recording-quality-plan-2026-10-28.md)已定位说话人对齐造成的碎片及“引用覆盖但重要条件遗漏”的实例：本页的结构覆盖和功能通过不能视为内容成品合格。其他 M 系列芯片及 macOS 14 真机尚未验证。
 
 原始日志、媒体、响应和隔离任务保留在被 Git 忽略的 `local-data/recording-validation/`，本页只公开结果与限制。主要本地证据为 `pipeline-validation.md`、`pipeline-asr-assessment.json`、`helper-validation.json`、`fifty-minute-validation.md`、`fifty-minute-pipeline-report.json`、`fifty-minute-audit.json`、测试日志、`bundled-recording-report.json`、`distribution-report.json`、`install-report.json` 及 GUI 截图。真人录音证据另存于私有子目录，包含两档结果、`provider-billing-reconciliation.json`、`high-128k-result-audit.json`、`install-report-14.json` 与质量审阅说明。使用方法见[录音整理](recordings.md)，复测与候选应用构建见[构建说明](building.md)。
