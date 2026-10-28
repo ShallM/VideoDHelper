@@ -43,21 +43,32 @@ final class WorkspaceModel: ObservableObject {
         do { library = try TaskLibrary.load() }
         catch { self.error = "无法读取项目目录。为保留现有归属，暂时停止修改目录；任务结果仍可打开。"; libraryWritable = false }
         history = AppStorage.history()
-        if let latest = history.first { openJob(latest) }
+        if let latest = visibleHistory.first { openJob(latest) }
     }
     var visibleHistory: [ProcessingJob] { library.tasks(history, in: collection, matching: historyQuery) }
     var collectionTitle: String {
         switch collection {
         case .recent: return "最近任务"
         case .unassigned: return "未归属"
+        case .archived: return "已归档"
         case .project(let id): return library.projects.first(where: { $0.id == id })?.name ?? "项目"
         }
     }
     var newTaskProjectID: String? { if case .project(let id) = collection { return id }; return nil }
     func taskCount(in collection: TaskCollection) -> Int { library.tasks(history, in: collection).count }
-    func refreshHistory() { history = AppStorage.history() }
+    func refreshHistory() {
+        history = AppStorage.history()
+        do { library = try TaskLibrary.load(); libraryWritable = true }
+        catch { libraryWritable = false; self.error = "无法读取任务目录，暂时停止修改归属和归档状态；原文件已保留。" }
+        if let job = currentJob, !isBusy, !history.contains(where: { $0.id == job.id }) { resetReader() }
+    }
     func newTask() {
         guard !isBusy else { return }
+        if collection == .archived { collection = .recent }
+        historyQuery = ""
+        resetReader()
+    }
+    private func resetReader() {
         metadata = nil; currentJob = nil; selectedTrackID = ""; link = ""
         segments = []; condensed = []; notes = nil; source = ""; title = "把视频变成学习笔记"
         selectedTab = 0; stage = ""; progress = nil; error = nil
@@ -75,17 +86,55 @@ final class WorkspaceModel: ObservableObject {
         if updateLibrary({ library in
             library.removeProject(project.id)
             return collection == .project(project.id) ? .unassigned : collection
-        }) { status = "已移除「\(project.name)」，其中的任务已移至未归属，结果文件保留。" }
+        }) { status = "已移除「\(project.name)」，任务归属已解除；已归档的任务保持归档，所有结果文件保留。" }
     }
     func moveJob(_ job: ProcessingJob, to projectID: String?) {
         if updateLibrary({ library in try library.moveTask(job.id, to: projectID); return collection }) {
-            status = "任务已移至\(library.project(for: job.id).map { "「\($0.name)」" } ?? "未归属")。"
+            if !isBusy { selectAfterRemoving(job.id) }
+            status = "任务已移至\(library.project(for: job.id).map { "「\($0.name)」" } ?? "未归属")。" + (library.isArchived(job.id) ? "仍保留在已归档中。" : "")
         }
+    }
+    var canManageTasks: Bool { !isBusy && libraryWritable }
+    func archiveJob(_ job: ProcessingJob) {
+        guard canManageTasks else { return }
+        do {
+            library = try TaskLifecycle.setArchived(true, taskID: job.id)
+            selectAfterRemoving(job.id)
+            status = "已归档「\(job.title)」。原稿、笔记和媒体保留，可在已归档中恢复。"
+        } catch { self.error = error.localizedDescription }
+    }
+    func restoreJob(_ job: ProcessingJob) {
+        guard canManageTasks else { return }
+        do {
+            library = try TaskLifecycle.setArchived(false, taskID: job.id)
+            collection = library.project(for: job.id).map { .project($0.id) } ?? .unassigned
+            historyQuery = ""
+            openJob(job)
+            status = "已恢复「\(job.title)」到\(collectionTitle)。"
+        } catch { self.error = error.localizedDescription }
+    }
+    func trashJob(_ job: ProcessingJob) {
+        guard canManageTasks else { return }
+        do {
+            library = try TaskLifecycle.trash(taskID: job.id)
+            history = AppStorage.history()
+            selectAfterRemoving(job.id)
+            status = "「\(job.title)」已移到 macOS 废纸篓。历史用量与费用保留。"
+        } catch {
+            // Also reconcile the rare case where Trash succeeded but its rollback failed.
+            refreshHistory()
+            self.error = error.localizedDescription
+        }
+    }
+    private func selectAfterRemoving(_ taskID: String) {
+        guard currentJob?.id == taskID, !visibleHistory.contains(where: { $0.id == taskID }) else { return }
+        if let next = visibleHistory.first { openJob(next) }
+        else { resetReader() }
     }
     private func updateLibrary(_ change: (inout TaskLibrary) throws -> TaskCollection) -> Bool {
         guard libraryWritable else { error = "项目目录未能读取，已保留原文件，请先修复 library.json 后重新打开应用。"; return false }
         do {
-            var updated = library
+            var updated = try TaskLibrary.load()
             let selected = try change(&updated)
             try updated.save()
             library = updated; collection = selected
@@ -102,7 +151,8 @@ final class WorkspaceModel: ObservableObject {
     }
     var audioFormats: [MediaFormat] { (metadata?.formats ?? []).filter { $0.hasAudio && !$0.hasVideo }.reversed() }
     var canStart: Bool { !isBusy && (metadata != nil || (!segments.isEmpty && currentJob == nil)) }
-    var canResume: Bool { !isBusy && currentJob != nil && currentJob?.state != "completed" }
+    var currentJobIsArchived: Bool { currentJob.map { library.isArchived($0.id) } ?? false }
+    var canResume: Bool { !isBusy && currentJob != nil && currentJob?.state != "completed" && !currentJobIsArchived }
     var stageLabel: String {
         switch stage {
         case "prepare": return "准备任务"
@@ -150,6 +200,7 @@ final class WorkspaceModel: ObservableObject {
     }
     func beginProcessing() {
         guard canStart else { return }
+        if collection == .archived { collection = .recent }
         if let info = metadata {
             guard (try? VideoReference.parse(link).url) == info.url else {
                 error = "链接已修改，请先重新读取视频信息，避免处理上一个视频。"; return
@@ -185,11 +236,11 @@ final class WorkspaceModel: ObservableObject {
         }
     }
     func resumeJob() {
-        guard let job = currentJob, !isBusy else { return }
+        guard let job = currentJob, canResume else { return }
         start(status: "继续任务，复用已保存的原稿与完成的分段…") { try await self.run(job) }
     }
     func compareSummary(strategy: String) {
-        guard let original = currentJob, !isBusy, !segments.isEmpty else { return }
+        guard let original = currentJob, !isBusy, !segments.isEmpty, !currentJobIsArchived else { return }
         let values = segments
         let projectID = library.project(for: original.id)?.id
         start(status: "使用同一份原稿创建对照任务…") {
@@ -233,7 +284,11 @@ final class WorkspaceModel: ObservableObject {
         reloadJob(job)
     }
     private func reloadJob(_ original: ProcessingJob) {
-        let job = (try? AppStorage.read(ProcessingJob.self, from: original.directory.appendingPathComponent("job.json"))) ?? original
+        guard let job = try? AppStorage.read(ProcessingJob.self, from: original.directory.appendingPathComponent("job.json")) else {
+            resetReader()
+            status = "任务已移走或无法读取，请刷新任务列表。"
+            return
+        }
         currentJob = job; title = job.title; source = job.source
         status = job.message; stage = job.stage; progress = job.progress
         if let values = try? AppStorage.read([TranscriptSegment].self, from: job.directory.appendingPathComponent("transcript.json")) { segments = values }
@@ -347,7 +402,8 @@ final class WorkspaceModel: ObservableObject {
             do { try await operation() }
             catch is CancellationError {
                 self.status = "已取消。已完成的数据保留，可继续处理。"
-                if var job = self.currentJob, job.state == "running" || job.state == "pending" {
+                if var job = self.currentJob, job.state == "running" || job.state == "pending",
+                   FileManager.default.fileExists(atPath: job.directory.appendingPathComponent("job.json").path) {
                     job.state = "cancelled"; job.message = self.status
                     try? AppStorage.write(job, to: job.directory.appendingPathComponent("job.json"))
                     self.currentJob = job; self.history = AppStorage.history()

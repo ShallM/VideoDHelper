@@ -36,6 +36,9 @@
 | **模型与用量** | 多服务商、多模型、连接测试、手填价格表；统计输入、输出、推理、缓存命中及分阶段费用估算，支持 CSV。 |
 | **本机存储** | 可选择完成后保留或清理媒体；只有文字成功保存后才清理。B 站会话留在本机，模型接口接收文字资料。 |
 
+> [!NOTE]
+> **开发分支已加入任务归档、恢复与删除，等待发布。** 删除使用 macOS 废纸篓，并保留历史用量。使用方法与截图见[任务管理验收](docs/validation-task-lifecycle.md)；当前 0.6.0 DMG 尚不包含这些功能。
+
 ## 开始使用
 
 从 **[GitHub Release 下载 DMG](https://github.com/ShallM/VideoDHelper/releases/latest)** → 打开 → 将 VideoDHelper 拖入 Applications → 复制完成后推出磁盘映像 → 从“应用程序”启动。
@@ -102,6 +105,7 @@ flowchart LR
 | [构建与开发](docs/building.md) | 环境、构建、测试、CI 产物、常见问题 |
 | [版本日志](CHANGELOG.md) | 0.1 → 0.6 的功能和修复 |
 | [开发记录](docs/development-log.md) | 关键取舍、验证结论与下一阶段 |
+| [任务管理验收（待发布）](docs/validation-task-lifecycle.md) | 归档、删除、项目联动、废纸篓恢复与计量保留 |
 | [总结设计](docs/summarization-v2.md) · [技术调研](docs/summarization-research-2026-10-25.md) | 全文阅读、来源核验、有界回读与设计依据 |
 | [0.2 验收](docs/validation-0.2.md) · [0.3 验收](docs/validation-0.3.md) · [0.4 验收](docs/validation-0.4.md) · [0.5 验收](docs/validation-0.5.md) · [0.6 安装验收](docs/validation-0.6.md) | 真实样本、用量口径、恢复和已知问题 |
 | [需求与历史方案](docs/project-plan.md) · [下载器调研](docs/downloader-research.md) | 产品范围与技术选择背景 |
@@ -126,7 +130,7 @@ PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v
 python3 scripts/check-publication.py
 ```
 
-0.6 功能基线：43 项 Swift、53 项 Python 测试。CI 运行离线测试并构建开发 `.app`，不访问 B 站账号、不下载模型、不调用付费模型。贡献前请阅读 [贡献指南](CONTRIBUTING.md)。
+0.6 功能基线：43 项 Swift、53 项 Python 测试；任务管理开发分支增至 52 项 Swift 测试。CI 运行离线测试并构建开发 `.app`，不访问 B 站账号、不下载模型、不调用付费模型。贡献前请阅读 [贡献指南](CONTRIBUTING.md)。
 
 </details>
 
