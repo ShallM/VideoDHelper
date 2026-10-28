@@ -138,7 +138,7 @@ struct WorkspacePage: View {
                 Label("另一个功能页正在处理，完成后可开始新任务。", systemImage: "hourglass")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if model.canResume {
+            if model.canResume && (!model.isRecording || !model.canTranscribeRecording || !model.controlsExpanded) {
                 Button { startOrManageASR(model.resumeJob) } label: {
                     Label(needsModelDownload ? "下载所选模型" : "继续处理", systemImage: needsModelDownload ? "arrow.down.circle" : "arrow.clockwise").frame(maxWidth: .infinity)
                 }
