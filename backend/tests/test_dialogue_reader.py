@@ -10,7 +10,7 @@ from common import UserError, read_json, write_json
 from dialogue_context import build_context
 from dialogue_reader import (Reader, SUMMARY_PROMPT, condensed_batches, summarize,
                              validate_condensed, validate_summary, _part_text_limit,
-                             validate_sparse_condensed, project_condensed)
+                             validate_sparse_condensed, project_condensed, validate_reader_text)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit, ReasoningOutputExhausted
 
 
@@ -257,6 +257,88 @@ class DialogueTests(unittest.TestCase):
         self.assertIn("[part2:B]" + originals[2]["text"], payload["sources"])
         self.assertEqual(set(actual), set(targets))
         self.assertEqual(engine.parts, originals)
+
+    def test_review_owns_six_units_with_full_context_and_only_intersecting_targets(self):
+        segments = transcript(13)
+        for index, segment in enumerate(segments):
+            segment.update(start=index * 10., end=index * 10. + 1.)
+        engine = self.prepared(segments)
+        self.assertEqual(len(engine.units), 13)
+        engine.document["overview"]["u"] = [0]
+        engine.document["chapters"][0]["claims"] = [{"id": f"claim-{i}", "text": "待核验的条件", "u": [i]} for i in range(13)]
+        for row in engine.dialogue:
+            for part in row["parts"]:
+                part["text"] += "。"
+        requests = []
+        def complete(prompt, payload, validator, **kwargs):
+            requests.append(copy.deepcopy(payload))
+            value = review(); validator(value); return value
+        with patch.object(engine.client, "complete", complete): engine.review_all()
+        self.assertEqual([p["owned_sources"] for p in requests], [list(range(6)), list(range(6, 12)), [12]])
+        self.assertEqual(engine.reviewed, set(range(13)))
+        self.assertEqual(engine.full_context_review_batches, 3)
+        for payload in requests:
+            self.assertEqual(set(map(int, re.findall(r"\[u(\d+)\]", payload["sources"]))), set(range(13)))
+            owned = set(payload["owned_sources"])
+            self.assertIn("overview", {t["id"] for t in payload["targets"]})
+            for target in payload["targets"]:
+                if target["kind"] == "dialogue_part": self.assertTrue(set(target["u"]).issubset(owned))
+                elif target["kind"] != "overview": self.assertTrue(set(target["u"]) & owned)
+        short = self.prepared()
+        with patch.object(short.client, "complete", complete): short.review_all()
+        self.assertEqual(short.review_batches, 1)
+
+    def test_full_context_review_rejection_falls_back_once_then_preserves_coverage(self):
+        engine = self.prepared()
+        modes = []
+        def complete(prompt, payload, validator, **kwargs):
+            modes.append(payload["source_context"])
+            if payload["source_context"] == "full": raise InputContextLimit()
+            value = review(); validator(value); return value
+        with patch.object(engine.client, "complete", complete): engine.review_all()
+        self.assertEqual(modes, ["full", "owned_and_evidence"])
+        self.assertEqual(engine.reviewed, set(engine.lookup))
+        self.assertEqual(engine.full_context_review_batches, 0)
+
+    def test_internal_ids_are_rejected_in_reader_text_but_real_source_code_survives(self):
+        for word in ("u4", "part12", "claim-7"):
+            with self.subTest(word=word), self.assertRaises(ValueError):
+                validate_reader_text(f"需要按{word}说明处理", ["这里没有代码变量。"])
+            validate_reader_text(f"代码变量{word}的值为2", [f"定义{word}=2"])
+        with self.assertRaises(ValueError): validate_reader_text("变量u4", ["变量u40"])
+        validate_reader_text("input_u4与part12_count是代码名", ["程序片段"])
+        units = build_context(transcript())
+        for field in ("overview", "title", "claim", "key_points", "uncertainties"):
+            value = summary_value(units)
+            if field == "overview": value[field]["text"] = "来源u4不清楚"
+            elif field == "title": value["chapters"][0]["title"] = "来源part12"
+            elif field == "claim": value["chapters"][0]["claims"][0]["text"] = "claim-7的解释"
+            else: value[field] = [{"text": "来源u4的条件", "u": [0]}]
+            with self.subTest(field=field), self.assertRaises(ValueError): validate_summary(value, units)
+        # A same-named variable in an unrelated unit is not evidence for this claim.
+        separate = [{"id": 0, "text": "普通内容"}, {"id": 1, "text": "代码u4=2"}]
+        value = summary_value(separate)
+        value["chapters"][0]["claims"][0] = {"text": "代码u4", "u": [0]}
+        with self.assertRaises(ValueError): validate_summary(value, separate)
+        value["chapters"][0]["claims"][0]["u"] = [1]
+        value["chapters"][0]["title"] = "代码u4"
+        validate_summary(value, separate)
+
+    def test_patch_addition_issue_body_cannot_leak_transport_ids(self):
+        engine = self.prepared()
+        for field in ("patches", "additions", "issues"):
+            value = review()
+            if field == "patches":
+                value[field] = [{"target_kind": "claim", "target_id": "claim-0", "action": "replace", "text": "请按u4核对", "u": [0]}]
+            elif field == "additions":
+                value[field] = [{"chapter_id": "chapter-0", "text": "part12的结论", "u": [0]}]
+            else:
+                value[field] = [{"kind": "ambiguity", "question": "claim-7是什么意思？", "u": [0], "query": "", "status": "unresolved"}]
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                engine.validate_review(value, {0}, engine.targets())
+        valid = review()
+        valid["patches"] = [{"target_kind": "claim", "target_id": "claim-0", "action": "replace", "text": "保留明确前提。", "u": [0]}]
+        engine.validate_review(valid, {0}, engine.targets())
 
     def test_output_exhaustion_expands_once_without_fragmenting_summary(self):
         for error in (ResponseOutputLimit, ReasoningOutputExhausted):
