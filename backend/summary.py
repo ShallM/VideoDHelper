@@ -116,6 +116,9 @@ class ChatClient:
             except (ValueError, KeyError, TypeError):
                 path.unlink()
         if limit_path.exists() and read_json(limit_path).get("kind") == "no_final_output":
+            with self.usage_lock:
+                self.limit_hits += 1
+                self.calls.append({"phase": phase, "checkpoint": path.stem, "limitCached": True})
             raise ReasoningOutputExhausted("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
         if (self.config.get("summaryVersion") and limit_path.exists()) or path.stem in self.known_output_limits:
             # A resumable fallback must not pay for the same known-too-small
@@ -215,7 +218,8 @@ class ChatClient:
                 # reasoning effort. Respect the run deadline as well.
                 remaining = self.config.get("summaryTimeoutSeconds", 14400) - (time.monotonic() - self.started)
                 long_request = self.reasoning_effort in ("high", "max") or body.get("max_tokens", 0) >= 8192
-                timeout = min(600 if long_request else 150, max(1, remaining))
+                wait_limit = 1800 if body.get("max_tokens", 0) > 32768 else (600 if long_request else 150)
+                timeout = min(wait_limit, max(1, remaining))
                 with opener.open(request, timeout=timeout) as response:
                     raw = response.read(8 * 1024 * 1024 + 1)
                 if len(raw) > 8 * 1024 * 1024:

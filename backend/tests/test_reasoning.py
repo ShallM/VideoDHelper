@@ -146,6 +146,16 @@ class ReasoningTests(unittest.TestCase):
         self.assertEqual(opener.open.call_count, 1)
         self.assertEqual(opener.open.call_args.kwargs["timeout"], 150)
 
+    def test_large_review_budget_allows_generation_time_without_duplicate_request(self):
+        client = self.client("high", summaryTimeoutSeconds=7200)
+        opener = Mock()
+        opener.open.side_effect = TimeoutError()
+        with patch("summary.urllib.request.build_opener", return_value=opener):
+            with self.assertRaisesRegex(UserError, "未自动重复提交"):
+                client.complete("prompt", {}, self.validate, output_tokens=131072)
+        self.assertEqual(opener.open.call_count, 1)
+        self.assertEqual(opener.open.call_args.kwargs["timeout"], 1800)
+
     def test_wrapped_timeout_and_remaining_run_budget(self):
         client = self.client("high", summaryTimeoutSeconds=30)
         opener = Mock()

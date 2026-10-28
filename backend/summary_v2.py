@@ -372,7 +372,9 @@ class Reader:
     def __init__(self, rows, title, config, folder, emit):
         self.rows, self.title, self.folder, self.emit = rows, title, Path(folder), emit
         self.dialogue = config.get("sourceKind") == "recording"
-        self.config = {"summaryMaxRequests": 80, "summaryMaxTokens": 500_000, "summaryTimeoutSeconds": 1800,
+        high_reasoning = config.get("reasoningEffort", "low") in ("high", "max")
+        self.config = {"summaryMaxRequests": 80, "summaryMaxTokens": 1_000_000 if high_reasoning else 500_000,
+                       "summaryTimeoutSeconds": 7200 if high_reasoning else 1800,
                        **config, "summaryVersion": DIALOGUE_VERSION if self.dialogue else VERSION}
         self.source_revision = config.get("sourceRevision") or digest(rows)
         self.client = ChatClient(self.config, self.folder / "checkpoints" / "summary-v2", emit)
@@ -413,14 +415,14 @@ class Reader:
         # This route reports reasoning within completion_tokens. Reserve room
         # for the JSON answer; a thinking-only truncation is never accepted.
         high_reasoning = self.client.reasoning_effort in ("high", "max")
-        limits = (16384, 32768) if high_reasoning else (16384, 24576)
+        limits = (16384, 32768, 131072) if high_reasoning else (16384, 24576)
         for index, limit in enumerate(limits):
             try:
                 return self.call(prompt, payload, validator, phase, limit)
             except (OutputLimit, ReasoningOutputExhausted) as error:
                 if index == len(limits) - 1 or (isinstance(error, ReasoningOutputExhausted) and not high_reasoning):
                     raise
-                self.emit("verify", "核验回答达到输出上限，保留进度并增加一次回答预算…")
+                self.emit("verify", f"核验回答达到输出上限，保留进度并将回答预算提高到 {limits[index + 1]:,} Tokens…")
 
     def draft(self, chapter, rows):
         references = set()
