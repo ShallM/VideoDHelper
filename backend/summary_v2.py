@@ -11,7 +11,7 @@ import threading
 import time
 
 from common import UserError, digest, encoded, validate_segments, write_json
-from summary import ChatClient, OutputLimit, ordered_parallel, text
+from summary import ChatClient, OutputLimit, ReasoningOutputExhausted, ordered_parallel, text
 
 VERSION = "source-reader-v2.0"
 DIALOGUE_VERSION = "dialogue-reader-v1.1"
@@ -412,11 +412,13 @@ class Reader:
     def review_call(self, payload, validator, phase, prompt=REVIEW_PROMPT):
         # This route reports reasoning within completion_tokens. Reserve room
         # for the JSON answer; a thinking-only truncation is never accepted.
-        for limit in (16384, 24576):
+        high_reasoning = self.client.reasoning_effort in ("high", "max")
+        limits = (16384, 32768) if high_reasoning else (16384, 24576)
+        for index, limit in enumerate(limits):
             try:
                 return self.call(prompt, payload, validator, phase, limit)
-            except OutputLimit:
-                if limit == 24576:
+            except (OutputLimit, ReasoningOutputExhausted) as error:
+                if index == len(limits) - 1 or (isinstance(error, ReasoningOutputExhausted) and not high_reasoning):
                     raise
                 self.emit("verify", "核验回答达到输出上限，保留进度并增加一次回答预算…")
 
@@ -642,7 +644,7 @@ class Reader:
                 rows = [self.rows[p] for p in selected]
                 payload = {"draft": overview, "sources": source_text(rows)}
                 try:
-                    overview = self.call(FINAL_PROMPT, payload, lambda v: validate_overview(v, set(selected)), "final_check", 16384)
+                    overview = self.review_call(payload, lambda v: validate_overview(v, set(selected)), "final_check", FINAL_PROMPT)
                 except OutputLimit:
                     extra.append({"p": selected[:1] or [0], "text": "概览最终回查超出本轮输入预算，请结合章节证据核对。"})
             questions = {}

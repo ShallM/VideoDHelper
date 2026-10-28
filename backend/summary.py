@@ -39,6 +39,10 @@ class OutputLimit(Exception):
     pass
 
 
+class ReasoningOutputExhausted(UserError):
+    """A metered response exhausted its output budget without a final answer."""
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -112,7 +116,7 @@ class ChatClient:
             except (ValueError, KeyError, TypeError):
                 path.unlink()
         if limit_path.exists() and read_json(limit_path).get("kind") == "no_final_output":
-            raise UserError("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
+            raise ReasoningOutputExhausted("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
         if (self.config.get("summaryVersion") and limit_path.exists()) or path.stem in self.known_output_limits:
             # A resumable fallback must not pay for the same known-too-small
             # output budget again before reaching its successful checkpoint.
@@ -170,7 +174,7 @@ class ChatClient:
             if choice.get("finish_reason") == "length":
                 if empty_final:
                     write_json(limit_path, {"kind": "no_final_output"})
-                    raise UserError("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
+                    raise ReasoningOutputExhausted("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
                 if self.config.get("summaryVersion"):
                     write_json(limit_path, {"kind": "output_limit"})
                 raise OutputLimit()

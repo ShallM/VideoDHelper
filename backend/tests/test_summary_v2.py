@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from common import UserError, read_json
-from summary import ChatClient, OutputLimit, summarize
+from summary import ChatClient, OutputLimit, ReasoningOutputExhausted, summarize
 from summary_v2 import (Reader, paragraphs, source_text, partition, validate_whole, validate_review,
                         apply_review, read_request, claim_index, coalesce_reads)
 
@@ -234,6 +234,36 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(calls, [16384, 24576])
         self.assertEqual(again.client.limit_hits, 1)
         self.assertEqual(again.client.cache_hits, 1)
+
+    def test_high_review_reasoning_exhaustion_expands_once_and_resumes_without_rebilling(self):
+        for expanded_succeeds in (True, False):
+            with self.subTest(expanded_succeeds=expanded_succeeds):
+                config = {**self.config, "reasoningEffort": "high"}
+                folder = self.folder / str(expanded_succeeds)
+                reader = Reader(paragraphs(transcript()), "高强度核验", config, folder, lambda *a: None)
+                calls = []
+                def response(client, body, phase="summary"):
+                    limit = body["max_tokens"]
+                    calls.append(limit)
+                    if limit == 32768 and expanded_succeeds:
+                        return {"choices": [{"finish_reason": "stop", "message": {"content": '{"valid":true}'}}]}
+                    return {"choices": [{"finish_reason": "length", "message": {"content": "", "reasoning_content": "private"}}],
+                            "usage": {"prompt_tokens": 100, "completion_tokens": limit, "total_tokens": 100 + limit,
+                                      "completion_tokens_details": {"reasoning_tokens": limit}}}
+                def review(target):
+                    if expanded_succeeds:
+                        self.assertEqual(target.review_call({}, lambda v: self.assertTrue(v["valid"]), "verify"), {"valid": True})
+                    else:
+                        with self.assertRaises(ReasoningOutputExhausted):
+                            target.review_call({}, lambda v: None, "verify")
+                with patch.object(ChatClient, "_request", autospec=True, side_effect=response):
+                    review(reader)
+                self.assertEqual(calls, [16384, 32768])
+                again = Reader(reader.rows, reader.title, config, folder, lambda *a: None)
+                with patch.object(ChatClient, "_request", side_effect=AssertionError("No repeated paid request")):
+                    review(again)
+                self.assertEqual(again.client.cache_hits, 1 if expanded_succeeds else 0)
+                self.assertNotIn("private", (reader.client.directory / "usage.jsonl").read_text())
 
     def test_legacy_resume_reuses_split_children_without_repeating_truncated_parent(self):
         config = {**self.config, "summaryStrategy": "legacy"}

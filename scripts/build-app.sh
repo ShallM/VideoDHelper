@@ -43,7 +43,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDisplayName</key><string>VideoDHelper</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.7.0</string>
-<key>CFBundleVersion</key><string>11</string>
+<key>CFBundleVersion</key><string>12</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
