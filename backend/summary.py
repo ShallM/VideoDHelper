@@ -39,6 +39,14 @@ class OutputLimit(Exception):
     pass
 
 
+class InputContextLimit(OutputLimit):
+    """Provider rejected the combined context before returning a completion."""
+
+
+class ResponseOutputLimit(OutputLimit):
+    """A completion was returned but its final content was truncated."""
+
+
 class ReasoningOutputExhausted(UserError):
     """A metered response exhausted its output budget without a final answer."""
 
@@ -126,7 +134,8 @@ class ChatClient:
             with self.usage_lock:
                 self.limit_hits += 1
                 self.calls.append({"phase": phase, "checkpoint": path.stem, "limitCached": True})
-            raise OutputLimit()
+            kind = read_json(limit_path).get("kind") if limit_path.exists() else "output_limit"
+            raise InputContextLimit() if kind == "provider_context_limit" else ResponseOutputLimit()
         feedback = ""
         for validation_attempt in range(2):
             body = {"model": self.config["model"], "stream": False, "max_tokens": output_tokens,
@@ -180,7 +189,7 @@ class ChatClient:
                     raise ReasoningOutputExhausted("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
                 if self.config.get("summaryVersion"):
                     write_json(limit_path, {"kind": "output_limit"})
-                raise OutputLimit()
+                raise ResponseOutputLimit()
             if choice.get("finish_reason") != "stop":
                 raise UserError("模型未正常结束，未把截断或被拒绝的内容保存成笔记。可继续重试。")
             if isinstance(message, dict) and empty_final and message.get("reasoning_content"):
@@ -245,7 +254,7 @@ class ChatClient:
                     error.close()
                 self.ledger.finish(event, "http_error", error_body.get("usage") if isinstance(error_body, dict) else None, http_status=error.code)
                 if code == "context_length_exceeded":
-                    raise OutputLimit() from None
+                    raise InputContextLimit() from None
                 if error.code in (429, 500, 502, 503, 504) and attempt < 2:
                     self.emit("summary", f"接口暂忙，{2 ** (attempt + 1)} 秒后重试（{attempt + 1}/2）…")
                     time.sleep(2 ** (attempt + 1))

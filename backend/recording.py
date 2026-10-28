@@ -285,20 +285,44 @@ def display_text(value, names):
 
 def export_dialogue(folder, title, segments, names, notes=None, condensed=None):
     def refs(ids):
-        return "、".join(stamp(segments[i]["start"]) for i in ids)
+        groups = []
+        for identity in sorted(set(ids)):
+            if groups and groups[-1][-1] + 1 == identity:
+                groups[-1].append(identity)
+            else:
+                groups.append([identity])
+        return "、".join(stamp(segments[group[0]]["start"]) +
+                        ("–" + stamp(segments[group[-1]]["end"]) if len(group) > 1 else "") for group in groups)
     raw = "\n\n".join(f'[{stamp(s["start"])}] {names.get(s.get("speaker", "unknown"), "未确定")}：{s["text"]}' for s in segments)
     write_text(folder / "dialogue-transcript.txt", raw + "\n")
     if notes is None: return
     lines = [f"# {title}", "来源：本地录音", f"整理模型：{notes['model']}", "## 对话概览", display_text(notes["overview"], names)]
+    if notes.get("overviewSourceIDs"):
+        lines.append(f"录音时间：{refs(notes['overviewSourceIDs'])}")
     for chapter in notes["chapters"]:
         lines += [f"## {display_text(chapter['title'], names)}"]
         for claim in chapter.get("claims", []):
             lines += [display_text(claim["text"], names), f"录音时间：{refs(claim['source_ids'])}"]
-    for label, key in (("主要观点与共识", "key_points"), ("分歧与待核对", "uncertainties")):
+    for label, key in (("主要观点与明确安排", "key_points"), ("分歧与待核对", "uncertainties")):
         lines += [f"## {label}"] + [f"- {display_text(item['text'], names)}（{refs(item['source_ids'])}）" for item in notes[key]]
     write_text(folder / "study-notes.md", "\n\n".join(lines) + "\n")
-    write_text(folder / "condensed.md", f"# {title} · 整理对话\n\n" + "\n\n".join(
-        f"[{refs(item['source_ids'])}] {names.get(item.get('speaker', 'unknown'), '未确定')}：{display_text(item['text'], names)}" for item in condensed) + "\n")
+    def cleaned_row(item):
+        parts = item.get("parts")
+        if parts:
+            # A mixed row is readable as one line while uncertain spans retain
+            # their own label. Do not make the whole row a third participant.
+            chunks, previous = [], None
+            for part in parts:
+                speaker = part.get("speaker", "unknown")
+                label = "归属未确定" if speaker == "unknown" else names.get(speaker, speaker)
+                prefix = (" " if chunks else "") + f"[{label}] " if speaker != previous else ""
+                chunks.append(prefix + display_text(part["text"], names))
+                previous = speaker
+            content = "".join(chunks)
+        else:
+            content = f"{names.get(item.get('speaker', 'unknown'), '未确定')}：{display_text(item['text'], names)}"
+        return f"[{refs(item['source_ids'])}] {content}"
+    write_text(folder / "condensed.md", f"# {title} · 整理对话\n\n" + "\n\n".join(cleaned_row(item) for item in condensed) + "\n")
 
 
 def run_recording(request, record, folder, support, emit, load_config, env_file=None):
@@ -318,11 +342,29 @@ def run_recording(request, record, folder, support, emit, load_config, env_file=
         config.update(taskID=record["id"], taskTitle=request["title"], sourceKind="recording", summaryStrategy="structured",
                       summaryReview=request.get("summaryReview", True), sourceRevision=revision,
                       recordingRevision=read_json(folder / "transcript-edits.json")["revision"] if (folder / "transcript-edits.json").exists() else "original")
-        from summary_v2 import summarize
+        strategy = request.get("dialogueStrategy") or "legacy"
+        if strategy == "context-v2":
+            # Derived context depends on acoustic boundaries as well as text.
+            # Display names are deliberately excluded: a rename is presentation.
+            config.update(dialogueStrategy=strategy, transcriptIdentity=digest(segments),
+                          diarizationIdentity=digest(read_json(folder / "diarization.json")) if (folder / "diarization.json").exists() else None)
+            generation = digest(request)
+            def before_publish():
+                current, _, current_revision = effective_transcript(folder)
+                if (digest(read_json(folder / "request.json")) != generation
+                        or current_revision != revision or digest(current) != config["transcriptIdentity"]):
+                    raise UserError("原稿或任务选项已变化，本轮结果未覆盖当前成果。已保存阶段，可按当前原稿重新整理。")
+            config["beforePublish"] = before_publish
+            from dialogue_reader import summarize
+        elif strategy == "legacy":
+            from summary_v2 import summarize
+        else:
+            raise UserError("录音理解方案无法识别，请更新应用后重试。")
         notes, condensed = summarize(segments, request["title"], config, folder, emit)
         export_dialogue(folder, request["title"], segments, names, notes, condensed)
         record.update(state="completed", stage="completed", progress=1.0, updatedAt=time.time(),
-            message="对话原稿、整理对话与总结已保存。", segmentCount=len(segments), sourceKind="recording", summarySourceRevision=revision)
+            message="对话原稿、整理对话与总结已保存。", segmentCount=len(segments), sourceKind="recording", summarySourceRevision=revision,
+            dialogueStrategy=strategy)
     write_json(folder / "job.json", record)
     print(json.dumps({"stage": record["stage"], "message": record["message"], "progress": 1}, ensure_ascii=False), flush=True)
     return 0

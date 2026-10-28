@@ -10,6 +10,7 @@ final class WorkspaceModel: ObservableObject {
     @Published var recordingURL: URL?
     @Published var recordingDuration: Double = 0
     @Published var recordingAction = "transcribe"
+    @Published var dialogueStrategy = DialogueStrategy.contextV2.rawValue
     @Published var diarizationMode = "two"
     @Published var speakerNames: [String: String] = ["A": "说话人 A", "B": "说话人 B"]
     @Published var editsRevision = "original"
@@ -106,6 +107,7 @@ final class WorkspaceModel: ObservableObject {
     }
     func resetReader() {
         recordingEditsValid = true
+        dialogueStrategy = DialogueStrategy.contextV2.rawValue
         playback.stop(); recordingURL = nil; recordingDuration = 0; editsRevision = "original"
         speakerNames = ["A": "说话人 A", "B": "说话人 B"]
         metadata = nil; currentJob = nil; selectedTrackID = ""; link = ""
@@ -222,12 +224,14 @@ final class WorkspaceModel: ObservableObject {
         case "diarize": return "区分说话人"
         case "transcribed": return "原稿已就绪"
         case "transcript": return "保存原稿"
-        case "summary": return "整理台词与章节"
+        case "summary": return isRecording ? "理解对话与主题" : "整理台词与章节"
+        case "condense": return "独立整理原话"
+        case "review": return "对照原文复核"
         case "plan": return "理解全文结构"
         case "chapter": return "整理主题笔记"
         case "verify": return "检查遗漏与依据"
         case "reread": return "回查原文"
-        case "overview": return "汇总学习笔记"
+        case "overview": return isRecording ? "汇总对话总结" : "汇总学习笔记"
         case "cleanup": return "清理媒体"
         case "completed": return "处理完成"
         default: return ""
@@ -336,7 +340,7 @@ final class WorkspaceModel: ObservableObject {
                 Task { @MainActor in
                     guard let self, self.isBusy, self.runID == thisRun else { return }
                     self.status = event.message; self.stage = event.stage; self.progress = event.progress
-                    if self.segments.isEmpty, ["transcript", "summary", "overview", "plan", "chapter", "verify", "reread"].contains(event.stage) {
+                    if self.segments.isEmpty, ["transcript", "summary", "condense", "review", "overview", "plan", "chapter", "verify", "reread"].contains(event.stage) {
                         self.segments = (try? AppStorage.read([TranscriptSegment].self, from: job.directory.appendingPathComponent("transcript.json"))) ?? []
                     }
                 }
@@ -365,8 +369,18 @@ final class WorkspaceModel: ObservableObject {
         status = job.message; stage = job.stage; progress = job.progress
         if let values = try? AppStorage.read([TranscriptSegment].self, from: job.directory.appendingPathComponent("transcript.json")) { segments = values }
         else if let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")) { segments = request.segments }
-        condensed = (try? AppStorage.read([CitedText].self, from: job.directory.appendingPathComponent("condensed.json"))) ?? []
-        notes = try? AppStorage.read(StudyNotes.self, from: job.directory.appendingPathComponent("notes.json"))
+        if workspace == .recording {
+            do {
+                let results = try RecordingResults.load(from: job.directory)
+                notes = results.notes; condensed = results.condensed
+            } catch {
+                notes = nil; condensed = []
+                self.error = "录音整理成果无法完整读取，已保留原稿与成果文件。请重新整理或恢复成果文件；未混用旧版结果。"
+            }
+        } else {
+            condensed = (try? AppStorage.read([CitedText].self, from: job.directory.appendingPathComponent("condensed.json"))) ?? []
+            notes = try? AppStorage.read(StudyNotes.self, from: job.directory.appendingPathComponent("notes.json"))
+        }
         if let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")) {
             summaryStrategy = request.summaryStrategy ?? "legacy"
             whisperModel = request.effectiveASRModelID

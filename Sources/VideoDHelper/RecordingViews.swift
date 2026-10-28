@@ -1,6 +1,33 @@
 import SwiftUI
 import VideoCore
 
+struct RecordingCondensedText: View {
+    @ObservedObject var model: WorkspaceModel
+    let item: CitedText
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let parts = item.parts, !parts.isEmpty {
+                mixedText(parts).lineSpacing(6).textSelection(.enabled)
+            } else {
+                Text(model.speakerName(item.speaker)).font(.caption).foregroundStyle(.teal)
+                Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled)
+            }
+        }
+    }
+
+    private func mixedText(_ parts: [DialoguePart]) -> Text {
+        parts.enumerated().reduce(Text("")) { value, pair in
+            let (index, part) = pair
+            if index > 0, parts[index - 1].speaker == part.speaker { return value + Text(model.displayText(part.text)) }
+            let color: Color = part.speaker == "A" ? .teal : part.speaker == "B" ? .purple : .secondary
+            return value + Text(index == 0 ? "" : " ")
+                + Text("[\(part.speakerLabel(names: model.speakerNames))] ").font(.caption).foregroundColor(color)
+                + Text(model.displayText(part.text))
+        }
+    }
+}
+
 struct AudioPlayerBar: View {
     @ObservedObject var player: AudioPlayback
     var body: some View {

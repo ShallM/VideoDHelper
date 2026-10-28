@@ -107,6 +107,11 @@ public struct UsageEvent: Codable, Identifiable, Sendable {
     }
     public var phaseLabel: String {
         switch phase {
+        case "dialogue_summary": return "对话全文理解"
+        case "dialogue_merge": return "对话分层综合"
+        case "dialogue_condense": return "独立整理原话"
+        case "dialogue_review": return "对照原文复核"
+        case "dialogue_reread": return "对话定向回读"
         case "whole": return "短稿整体阅读"
         case "plan", "plan_merge": return "全文结构"
         case "chapter": return "主题笔记"

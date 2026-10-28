@@ -442,7 +442,20 @@ struct WorkspacePage: View {
                     Label("保存到「\(model.collectionTitle)」", systemImage: "folder")
                 }
             }.font(.caption).foregroundStyle(.secondary)
-            if model.currentJob != nil && !model.segments.isEmpty && !model.isRecording {
+            if model.isRecording {
+                HStack(spacing: 12) {
+                    Label(model.dialogueStrategyLabel, systemImage: "text.book.closed")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if model.currentJob != nil && !model.segments.isEmpty {
+                        Menu {
+                            Button("全文对话理解 · 新方案") { model.compareRecording(strategy: .contextV2) }
+                            Button("旧版对话流程 · 基线") { model.compareRecording(strategy: .legacy) }
+                        } label: { Label("新建对照任务", systemImage: "square.on.square") }
+                            .disabled(!model.canSummarizeRecording || otherIsBusy)
+                            .help("复制原稿、校订与录音，保留当前任务的成果；不会自动调用模型。")
+                    }
+                }
+            } else if model.currentJob != nil && !model.segments.isEmpty {
                 Menu {
                     Button("全文理解与核验") { model.compareSummary(strategy: "structured") }
                     Button("旧版分块") { model.compareSummary(strategy: "legacy") }
@@ -456,7 +469,7 @@ struct WorkspacePage: View {
         VStack(spacing: 15) {
             Image(systemName: model.isBusy ? "waveform" : "text.book.closed").font(.system(size: 44, weight: .light)).foregroundStyle(.teal)
             Text(model.isBusy ? model.stageLabel : model.currentJobIsArchived ? "任务已归档" : model.currentJob != nil ? "任务已保存，可以继续处理" : model.isRecording ? "从一段录音开始" : model.metadata == nil ? "从一个视频开始" : "视频已准备好").font(.title2.bold())
-            Text(model.isBusy ? "处理过程中可以取消；完成的阶段会留在本机。" : model.currentJobIsArchived ? "已完成的阶段保留在本机。恢复任务后可以继续处理。" : model.isRecording ? "导入手机录音，在本机提取原话和区分说话人。\n检查原稿后，再整理双方观点、问答与共识。" : "原始台词、精简台词与学习笔记分别保存。\n技术细节和来源时间一起保留，方便回看核对。")
+            Text(model.isBusy ? "处理过程中可以取消；完成的阶段会留在本机。" : model.currentJobIsArchived ? "已完成的阶段保留在本机。恢复任务后可以继续处理。" : model.isRecording ? "导入手机录音，在本机提取原话和区分说话人。\n检查原稿后，再整理双方观点、问答与明确安排。" : "原始台词、精简台词与学习笔记分别保存。\n技术细节和来源时间一起保留，方便回看核对。")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             if model.currentJobIsArchived, let job = model.currentJob {
                 Button("恢复任务") { model.restoreJob(job) }.disabled(!model.canManageTasks)
@@ -509,8 +522,16 @@ struct WorkspacePage: View {
                         }
                     } else if model.selectedTab == 1 {
                         if model.condensed.isEmpty { pendingText }
+                        if model.isRecording && model.condensed.contains(where: { $0.parts?.contains(where: { $0.speaker == "unknown" }) == true }) {
+                            Text("“归属未确定”只标记局部片段，不代表第三位说话人；可按时间回听原话。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         ForEach(Array(model.condensed.enumerated()), id: \.offset) { _, item in
-                            VStack(alignment: .leading, spacing: 8) { sourceButton(item.source_ids); if model.isRecording { Text(model.speakerName(item.speaker)).font(.caption).foregroundStyle(.teal) }; Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled) }
+                            VStack(alignment: .leading, spacing: 8) {
+                                sourceButton(item.source_ids)
+                                if model.isRecording { RecordingCondensedText(model: model, item: item) }
+                                else { Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled) }
+                            }
                         }
                     } else if let notes = model.notes {
                         notesView(notes)
@@ -544,15 +565,17 @@ struct WorkspacePage: View {
     private func notesView(_ notes: StudyNotes) -> some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(spacing: 10) {
-                Label(notes.summaryStrategy == "structured" ? "全文理解" : notes.summaryStrategy == "compact" ? "紧凑输入对照" : "旧版分块", systemImage: "text.book.closed")
+                Label(notes.summaryStrategy == "context-v2" ? "全文对话理解" : model.isRecording ? "旧版对话流程" : notes.summaryStrategy == "structured" ? "全文理解" : notes.summaryStrategy == "compact" ? "紧凑输入对照" : "旧版分块", systemImage: "text.book.closed")
+                if notes.summaryStrategy == "context-v2", notes.summaryRoute == "hierarchical" { Text("长稿分层") }
                 if let read = notes.reviewedParagraphs, let count = notes.paragraphCount {
-                    Text("核验已读 \(read)/\(count) 段")
+                    Text(notes.summaryStrategy == "context-v2" ? "原文复核 \(read)/\(count) 单元" : "核验已读 \(read)/\(count) 段")
                 }
                 if let count = notes.rereadCount, count > 0 { Text("定向回查 \(count) 处") }
             }.font(.caption).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 10) {
                 Label("概览", systemImage: "sparkles").font(.headline).foregroundStyle(.teal)
                 Text(model.displayText(notes.overview)).lineSpacing(7).textSelection(.enabled)
+                if let ids = notes.overviewSourceIDs, !ids.isEmpty { sourceButton(ids) }
             }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(Color.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
             Text(model.isRecording ? "主题与双方观点" : "分章节学习笔记").font(.title3.bold())
             ForEach(Array(notes.chapters.enumerated()), id: \.offset) { index, item in
@@ -572,14 +595,20 @@ struct WorkspacePage: View {
                 }
             }
             Divider()
-            Text(model.isRecording ? "共识与主要结论" : "关键结论").font(.title3.bold())
+            Text(model.isRecording ? "主要观点与明确安排" : "关键结论").font(.title3.bold())
             ForEach(Array(notes.key_points.enumerated()), id: \.offset) { _, item in
                 VStack(alignment: .leading, spacing: 8) { Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled); sourceButton(item.source_ids) }
             }
             if !notes.uncertainties.isEmpty {
                 Text("待核对内容").font(.title3.bold())
                 ForEach(Array(notes.uncertainties.enumerated()), id: \.offset) { _, item in
-                    VStack(alignment: .leading, spacing: 8) { Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled); sourceButton(item.source_ids) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        if model.isRecording && item.status == "needs_audio" {
+                            Label("需回听", systemImage: "ear").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled)
+                        sourceButton(item.source_ids)
+                    }
                 }
             }
             Text("依据来源文字整理 · \(notes.model)\n" + (model.isRecording ? "忠实整理对话中的观点，不将个人说法视为已核实事实。" : "视频中的新闻、观点和推测未做外部事实核查。")).font(.caption).foregroundStyle(.secondary)

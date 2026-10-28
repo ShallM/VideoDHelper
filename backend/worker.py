@@ -49,6 +49,8 @@ def validate_request(request):
     if kind not in ("bilibili", "recording"):
         raise UserError("任务来源类型无效。")
     if kind == "recording":
+        if (request.get("dialogueStrategy") or "legacy") not in ("legacy", "context-v2"):
+            raise UserError("录音理解方案无法识别，请更新应用后重试。")
         if request.get("recordingAction", "transcribe") not in ("transcribe", "summarize") or request.get("diarizationMode", "off") not in ("two", "off"):
             raise UserError("录音处理选项无效。")
         if not isinstance(request.get("title"), str) or not request["title"].strip():

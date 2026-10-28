@@ -106,6 +106,7 @@ public struct ProcessingJob: Codable, Identifiable, Sendable {
     public var mediaFiles: [String]
     public var segmentCount: Int?
     public var summaryStrategy: String?
+    public var dialogueStrategy: String?
     public var sourceKind: WorkspaceKind?
     public var workspace: WorkspaceKind { sourceKind ?? .bilibili }
     public var directory: URL { AppStorage.jobs(for: workspace).appendingPathComponent(id, isDirectory: true) }
@@ -116,7 +117,10 @@ public struct ProcessingJob: Codable, Identifiable, Sendable {
         createdAt = Date().timeIntervalSince1970; updatedAt = createdAt
         state = "pending"; stage = "prepare"; message = "等待处理"; mediaFiles = []
     }
-    public var summaryStrategyLabel: String { summaryStrategy == "structured" ? "全文理解" : "旧版分块" }
+    public var summaryStrategyLabel: String {
+        if workspace == .recording { return DialogueStrategy.label(for: dialogueStrategy) }
+        return summaryStrategy == "structured" ? "全文理解" : "旧版分块"
+    }
     public var stateLabel: String {
         switch state {
         case "completed": return "已完成"
@@ -150,6 +154,9 @@ public struct ProcessingRequest: Codable, Sendable {
     public var localAudioFile: String?
     public var recordingAction: String?
     public var diarizationMode: String?
+    /// Missing on older recordings: their original reader and checkpoints remain in use.
+    public var dialogueStrategy: String?
+    public var effectiveDialogueStrategy: String { dialogueStrategy ?? DialogueStrategy.legacy.rawValue }
     public init(title: String, url: String, source: String, segments: [TranscriptSegment], useWhisper: Bool,
                 mediaMode: String, keepMedia: Bool, videoFormatID: String, audioFormatID: String, videoIncludesAudio: Bool,
                 container: String, whisperModel: String, summaryStrategy: String = "structured") {
@@ -160,10 +167,51 @@ public struct ProcessingRequest: Codable, Sendable {
     }
 }
 
+public enum DialogueStrategy: String, CaseIterable, Codable, Sendable {
+    case legacy
+    case contextV2 = "context-v2"
+
+    public static func label(for value: String?) -> String {
+        switch value {
+        case nil, Self.legacy.rawValue: return "旧版对话流程"
+        case Self.contextV2.rawValue: return "全文对话理解"
+        default: return "其他对话流程"
+        }
+    }
+}
+
+public struct DialoguePart: Codable, Sendable {
+    public let id: String
+    public let speaker: String
+    public let text: String
+    public let source_ids: [Int]
+
+    public func speakerLabel(names: [String: String]) -> String {
+        if speaker == "A" || speaker == "B" { return names[speaker] ?? "说话人 \(speaker)" }
+        return "归属未确定"
+    }
+}
+
 public struct CitedText: Codable, Sendable {
+    public let id: String?
     public let source_ids: [Int]
     public let text: String
     public var speaker: String?
+    public let parts: [DialoguePart]?
+    public let status: String?
+
+    public func dialogueText(names: [String: String]) -> String {
+        if let parts, !parts.isEmpty {
+            return parts.enumerated().map { index, part in
+                if index > 0, parts[index - 1].speaker == part.speaker { return part.text }
+                return "\(index == 0 ? "" : " ")[\(part.speakerLabel(names: names))] \(part.text)"
+            }.joined()
+        }
+        let name: String
+        if let speaker, speaker == "A" || speaker == "B" { name = names[speaker] ?? "说话人 \(speaker)" }
+        else { name = "归属未确定" }
+        return "\(name)：\(text)"
+    }
 }
 public struct StudyChapter: Codable, Sendable {
     public let source_ids: [Int]
@@ -173,6 +221,7 @@ public struct StudyChapter: Codable, Sendable {
 }
 public struct StudyNotes: Codable, Sendable {
     public let overview: String
+    public let overviewSourceIDs: [Int]?
     public let chapters: [StudyChapter]
     public let key_points: [CitedText]
     public let uncertainties: [CitedText]
@@ -184,6 +233,34 @@ public struct StudyNotes: Codable, Sendable {
     public let paragraphCount: Int?
     public let rereadCount: Int?
     public let recordingRevision: String?
+}
+
+/// One publication generation: notes and cleaned dialogue are always read together.
+public struct DialogueResultsBundle: Codable, Sendable {
+    public let schemaVersion: Int
+    public let generationID: String
+    public let notes: StudyNotes
+    public let condensed: [CitedText]
+}
+
+public struct RecordingResults: Sendable {
+    public let notes: StudyNotes?
+    public let condensed: [CitedText]
+
+    public static func load(from directory: URL) throws -> RecordingResults {
+        let bundleURL = directory.appendingPathComponent("dialogue-results.json")
+        if FileManager.default.fileExists(atPath: bundleURL.path) {
+            let bundle = try AppStorage.read(DialogueResultsBundle.self, from: bundleURL)
+            guard bundle.schemaVersion == 1, !bundle.generationID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw VideoError.toolFailed("录音成果版本无法读取，已保留原文件。")
+            }
+            return RecordingResults(notes: bundle.notes, condensed: bundle.condensed)
+        }
+        // Older tasks have no bundle. Once a bundle exists, a failed decode must
+        // never fall back to individual files that may belong to other generations.
+        return RecordingResults(notes: try? AppStorage.read(StudyNotes.self, from: directory.appendingPathComponent("notes.json")),
+                                condensed: (try? AppStorage.read([CitedText].self, from: directory.appendingPathComponent("condensed.json"))) ?? [])
+    }
 }
 public struct WorkerEvent: Decodable, Sendable {
     public let stage: String

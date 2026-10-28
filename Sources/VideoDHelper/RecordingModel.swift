@@ -8,6 +8,7 @@ extension WorkspaceModel {
     var summaryStale: Bool { isRecording && notes != nil && (notes?.recordingRevision ?? "original") != editsRevision }
     var canSummarizeRecording: Bool { isRecording && !isBusy && !segments.isEmpty && currentJob != nil && !currentJobIsArchived && recordingEditsValid }
     var canTranscribeRecording: Bool { isRecording && !isBusy && recordingURL != nil && !currentJobIsArchived && editsRevision == "original" && recordingAction == "transcribe" && currentJob?.state != "transcribed" && currentJob?.state != "completed" }
+    var dialogueStrategyLabel: String { DialogueStrategy.label(for: dialogueStrategy) }
 
     func importRecording() {
         guard isRecording, !isBusy else { return }
@@ -41,7 +42,8 @@ extension WorkspaceModel {
             try Task.checkCancellation()
             if self.collection == .archived { self.collection = .recent }
             let projectID = self.newTaskProjectID
-            let job = ProcessingJob(title: url.deletingPathExtension().lastPathComponent, url: "", source: "手机录音 · 普通话", summaryStrategy: "structured", workspace: .recording)
+            var job = ProcessingJob(title: url.deletingPathExtension().lastPathComponent, url: "", source: "手机录音 · 普通话", summaryStrategy: "structured", workspace: .recording)
+            job.dialogueStrategy = DialogueStrategy.contextV2.rawValue
             let relative = "source/original.\(ext)"
             let destination = job.directory.appendingPathComponent(relative)
             var committed = false
@@ -58,11 +60,13 @@ extension WorkspaceModel {
             request.asrModelID = selectedModel
             request.sourceKind = .recording; request.localAudioFile = relative
             request.recordingAction = "transcribe"; request.diarizationMode = self.diarizationMode
+            request.dialogueStrategy = DialogueStrategy.contextV2.rawValue
             try Task.checkCancellation()
             try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
             try AppStorage.write(job, to: job.directory.appendingPathComponent("job.json"))
             committed = true
             self.currentJob = job; self.recordingAction = "transcribe"
+            self.dialogueStrategy = request.effectiveDialogueStrategy
             self.whisperModel = selectedModel
             self.metadata = nil; self.link = ""; self.segments = []; self.condensed = []; self.notes = nil
             self.title = job.title; self.source = job.source; self.recordingURL = destination; self.recordingDuration = duration
@@ -89,7 +93,7 @@ extension WorkspaceModel {
     }
     func summarizeRecording() {
         guard let job = currentJob, canSummarizeRecording else { return }
-        start(status: "正在整理双方观点、问答与共识…") {
+        start(status: "正在整理双方观点、问答与明确安排…") {
             var request = try AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json"))
             request.recordingAction = "summarize"
             self.recordingAction = "summarize"
@@ -97,8 +101,27 @@ extension WorkspaceModel {
             try await self.run(job)
         }
     }
+    func compareRecording(strategy: DialogueStrategy) {
+        guard let original = currentJob, canSummarizeRecording else { return }
+        let projectID = library.project(for: original.id)?.id
+        start(status: "正在保留原任务并创建独立录音对照…") {
+            let copying = Task.detached(priority: .userInitiated) {
+                try RecordingComparison.create(taskID: original.id, strategy: strategy)
+            }
+            let job = try await withTaskCancellationHandler {
+                try await copying.value
+            } onCancel: { copying.cancel() }
+            self.playback.stop()
+            self.historyQuery = ""
+            self.reloadJob(job)
+            self.history = AppStorage.history().filter { $0.workspace == self.workspace }
+            if let projectID { self.moveJob(job, to: projectID) }
+            self.status = "已创建\(DialogueStrategy.label(for: strategy.rawValue))对照，原任务与成果保留。点击“整理与总结”开始。"
+        }
+    }
     func loadRecording(_ job: ProcessingJob) {
         recordingURL = nil; recordingDuration = 0; recordingAction = "transcribe"
+        dialogueStrategy = job.dialogueStrategy ?? DialogueStrategy.legacy.rawValue
         playback.stop()
         speakerNames = (try? AppStorage.read([String: String].self, from: job.directory.appendingPathComponent("speakers.json"))) ?? ["A": "说话人 A", "B": "说话人 B"]
         editsRevision = "original"; recordingEditsValid = true
@@ -117,16 +140,18 @@ extension WorkspaceModel {
                 self.error = "无法读取录音校订，原文件已保留；当前显示机器原稿。修复校订文件后可继续编辑和总结。"
             }
         }
-        if let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")),
-           let relative = request.localAudioFile, relative.hasPrefix("source/"), !relative.contains("..") {
+        if let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")) {
             recordingAction = request.recordingAction ?? "transcribe"
+            dialogueStrategy = request.effectiveDialogueStrategy
             whisperModel = request.effectiveASRModelID
             diarizationMode = request.diarizationMode ?? "off"
             struct SourceInfo: Decodable { let duration: Double }
             recordingDuration = (try? AppStorage.read(SourceInfo.self, from: job.directory.appendingPathComponent("recording-source.json")))?.duration ?? 0
-            let url = job.directory.appendingPathComponent(relative).resolvingSymlinksInPath()
-            if url.path.hasPrefix(job.directory.resolvingSymlinksInPath().path + "/source/"), FileManager.default.fileExists(atPath: url.path) {
-                recordingURL = url; playback.load(url, duration: recordingDuration)
+            if let relative = request.localAudioFile, relative.hasPrefix("source/"), !relative.contains("..") {
+                let url = job.directory.appendingPathComponent(relative).resolvingSymlinksInPath()
+                if url.path.hasPrefix(job.directory.resolvingSymlinksInPath().path + "/source/"), FileManager.default.fileExists(atPath: url.path) {
+                    recordingURL = url; playback.load(url, duration: recordingDuration)
+                }
             }
         }
     }
@@ -165,18 +190,19 @@ extension WorkspaceModel {
         var lines = ["# \(title) · \(notesExport ? "对话总结" : "整理对话")", ""]
         if notesExport, let notes {
             lines += [displayText(notes.overview), ""]
+            if let ids = notes.overviewSourceIDs, !ids.isEmpty { lines += ["[" + sourceLabel(ids) + "]", ""] }
             for chapter in notes.chapters {
                 lines += ["## " + displayText(chapter.title), ""]
                 if let claims = chapter.claims, !claims.isEmpty {
                     for claim in claims { lines += [displayText(claim.text), "[" + sourceLabel(claim.source_ids) + "]", ""] }
                 } else { lines += [displayText(chapter.detail), "[" + sourceLabel(chapter.source_ids) + "]", ""] }
             }
-            for (heading, items) in [("共识与主要结论", notes.key_points), ("待核对内容", notes.uncertainties)] where !items.isEmpty {
+            for (heading, items) in [("主要观点与明确安排", notes.key_points), ("待核对内容", notes.uncertainties)] where !items.isEmpty {
                 lines += ["## " + heading, ""]
                 for item in items { lines += [displayText(item.text), "[" + sourceLabel(item.source_ids) + "]", ""] }
             }
         } else {
-            for item in condensed { lines += ["[" + sourceLabel(item.source_ids) + "] " + speakerName(item.speaker) + "：" + displayText(item.text), ""] }
+            for item in condensed { lines += ["[" + sourceLabel(item.source_ids) + "] " + displayText(item.dialogueText(names: speakerNames)), ""] }
         }
         return lines.joined(separator: "\n")
     }

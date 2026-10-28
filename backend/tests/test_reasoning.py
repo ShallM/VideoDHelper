@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import urllib.error
 
 from common import UserError
-from summary import ChatClient, OutputLimit, reasoning_effort
+from summary import ChatClient, OutputLimit, InputContextLimit, ResponseOutputLimit, reasoning_effort
 
 
 class ReasoningTests(unittest.TestCase):
@@ -90,6 +90,30 @@ class ReasoningTests(unittest.TestCase):
                 client.complete("prompt", {"source": "text"}, self.validate)
         self.assertEqual(list(self.folder.glob("*.json")), [])
         self.assertEqual(len(list((self.folder / "limits").glob("*.json"))), 1)
+
+    def test_input_context_and_output_limits_remain_distinct_after_restart(self):
+        for kind, expected in (("provider_context_limit", InputContextLimit), ("output_limit", ResponseOutputLimit)):
+            directory = self.folder / kind
+            config = {**self.config, "summaryVersion": "typed-limits"}
+            client = ChatClient(config, directory, lambda *a: None)
+            request = {"side_effect": InputContextLimit()} if kind == "provider_context_limit" else {"return_value": self.response(reason="length")}
+            with patch.object(client, "_request", **request):
+                with self.assertRaises(expected):
+                    client.complete("prompt", {}, self.validate)
+            resumed = ChatClient(config, directory, lambda *a: None)
+            with patch.object(resumed, "_request", side_effect=AssertionError("must not repeat paid request")):
+                with self.assertRaises(expected):
+                    resumed.complete("prompt", {}, self.validate)
+
+    def test_provider_context_error_has_input_class_without_retry(self):
+        client = self.client("high", summaryVersion="typed-limits")
+        opener = Mock()
+        opener.open.side_effect = urllib.error.HTTPError(client.endpoint, 400, "Bad Request", {},
+            io.BytesIO(b'{"error":{"code":"context_length_exceeded"}}'))
+        with patch("summary.urllib.request.build_opener", return_value=opener):
+            with self.assertRaises(InputContextLimit):
+                client.complete("prompt", {}, self.validate)
+        self.assertEqual(opener.open.call_count, 1)
 
     def test_reasoning_exhaustion_stops_fallback_and_survives_restart(self):
         client = self.client("low", summaryVersion="reasoning-test")
