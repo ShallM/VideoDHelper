@@ -4,12 +4,13 @@ import tempfile
 import sys
 from types import SimpleNamespace
 import unittest
+import wave
 from unittest.mock import patch
 
 from asr_adapters import (QwenAdapter, alignment_text_spans, readable_segments, remap_alignment,
                           qwen_recognition_result, QWEN_MAX_TOKENS)
 from common import UserError, digest, read_json, validate_segments, write_json
-from media import _freeze_model, _transcribe_managed, owned_words
+from media import _freeze_model, _transcribe_managed, owned_words, _wave_has_signal
 
 
 def aligned_items(text, start=0.2, step=0.2):
@@ -19,6 +20,19 @@ def aligned_items(text, start=0.2, step=0.2):
 
 
 class TextAlignmentTests(unittest.TestCase):
+    def test_digital_silence_guard_preserves_even_one_quiet_sample(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "silence.wav"
+            def save(data):
+                with wave.open(str(path), "wb") as stream:
+                    stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(16000)
+                    stream.writeframes(data)
+            for samples in (480, 16000):
+                save(bytes(samples * 2))
+                self.assertFalse(_wave_has_signal(path))
+            save(bytes(32000) + b"\x01\x00")
+            self.assertTrue(_wave_has_signal(path))
+
     def test_chinese_english_decimal_case_spaces_and_script_are_exactly_preserved(self):
         text = "  「繁體測試」，GPT-4.1 的學習率 3e-4；don't 改！\n 下一句。  "
         words = remap_alignment(text, aligned_items(text), 30)
@@ -147,7 +161,7 @@ class CheckpointTests(unittest.TestCase):
         plan = {"boundaries": [0., 240., 480.], "snappedBoundaries": 0, "fallbackBoundaries": 1}
         def run():
             return _transcribe_managed(Path("audio"), "qwen3-asr-1.7b", self.root, lambda *a: None, 480., installed, snapshot, mx)
-        with patch("media.QwenAdapter", FakeAdapter), patch("media.plan_windows", return_value=plan), patch("media._extract_wave"):
+        with patch("media.QwenAdapter", FakeAdapter), patch("media.plan_windows", return_value=plan), patch("media._extract_wave", return_value=True):
             with self.assertRaisesRegex(UserError, "alignment failed"):
                 run()
             self.assertEqual(calls["recognition"], 2)
@@ -173,7 +187,7 @@ class CheckpointTests(unittest.TestCase):
         module = SimpleNamespace(transcribe=recognize)
         mx = SimpleNamespace(default_device=lambda: "gpu", get_peak_memory=lambda: 123)
         plan = {"boundaries": [0., 1.], "snappedBoundaries": 0, "fallbackBoundaries": 0}
-        with patch.dict(sys.modules, {"mlx_whisper": module}), patch("media.plan_windows", return_value=plan), patch("media._extract_wave"):
+        with patch.dict(sys.modules, {"mlx_whisper": module}), patch("media.plan_windows", return_value=plan), patch("media._extract_wave", return_value=True):
             for name in ("turbo", "large-v3"):
                 folder = self.root / name; folder.mkdir()
                 resources = {"modelID": name, "engine": "mlx-whisper", "components": []}
@@ -195,6 +209,20 @@ class CheckpointTests(unittest.TestCase):
         with patch("media.plan_windows", return_value=plan), patch("media._extract_wave", side_effect=AssertionError("must reject before decode")):
             with self.assertRaisesRegex(UserError, "范围"):
                 _transcribe_managed(Path("audio"), "qwen3-asr-1.7b", self.root, lambda *a: None, 310., installed, snapshot, mx)
+
+    def test_digital_silence_never_calls_either_recognizer(self):
+        plan = {"boundaries": [0., 1.], "snappedBoundaries": 0, "fallbackBoundaries": 0}
+        mx = SimpleNamespace(default_device=lambda: "gpu", get_peak_memory=lambda: 0)
+        for name, engine in (("turbo", "mlx-whisper"), ("large-v3", "mlx-whisper"), ("qwen3-asr-1.7b", "mlx-audio")):
+            folder = self.root / name; folder.mkdir()
+            resource = {"modelID": name, "engine": engine, "components": []}
+            snapshot = _freeze_model(folder, name, resource, "audio", True, False)
+            with patch("media._extract_wave", return_value=False), patch("media.plan_windows", return_value=plan), \
+                 patch.object(QwenAdapter, "recognize", side_effect=AssertionError("must skip silent ASR")), \
+                 patch.object(QwenAdapter, "align", side_effect=AssertionError("must skip silent alignment")):
+                with self.assertRaisesRegex(UserError, "没有识别到有效语音"):
+                    _transcribe_managed(Path("audio"), name, folder, lambda *a: None, 1.,
+                        {"snapshot": resource, "paths": {}}, snapshot, mx)
 
 
 if __name__ == "__main__":

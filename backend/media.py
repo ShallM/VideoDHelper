@@ -269,6 +269,19 @@ def _extract_wave(path, wave, offset, seconds):
                              "-c:a", "pcm_s16le", str(wave)], capture_output=True, timeout=120)
     if result.returncode:
         raise UserError("音频转换失败，原音频与已完成片段已保留。")
+    return _wave_has_signal(wave)
+
+
+def _wave_has_signal(path):
+    """Reject exact digital silence, without a threshold that drops quiet speech."""
+    import wave
+    with wave.open(str(path), "rb") as stream:
+        if stream.getsampwidth() != 2 or stream.getnchannels() != 1:
+            raise UserError("转录音频格式无效，原文件已保留。")
+        while block := stream.readframes(65536):
+            if block.strip(b"\x00"):
+                return True
+    return False
 
 
 def transcribe(path, name, folder, support, emit, preserve_word_timing=False, legacy=False, asr_snapshot=None):
@@ -360,8 +373,11 @@ def _transcribe_managed(path, name, folder, emit, duration, installed, snapshot,
                         raise UserError("Qwen 识别检查点无效，原文件已保留。")
                     runtime["reusedRecognitionWindows"] += 1
                 else:
-                    _extract_wave(path, wave, offset, seconds)
-                    raw = adapter.recognize(wave, seconds)
+                    if _extract_wave(path, wave, offset, seconds):
+                        raw = adapter.recognize(wave, seconds)
+                    else:
+                        raw = {"text": "", "localPromptTokens": 0, "localGenerationTokens": 0,
+                               "audioSeconds": seconds, "digitalSilence": True}
                     write_json(checkpoint, raw)
                     runtime["computedRecognitionWindows"] += 1
                     runtime["localPromptTokens"] += raw["localPromptTokens"]
@@ -382,8 +398,10 @@ def _transcribe_managed(path, name, folder, emit, duration, installed, snapshot,
                 if qwen:
                     runtime["reusedAlignmentWindows"] += 1
             else:
-                _extract_wave(path, wave, offset, seconds)
-                if qwen:
+                has_signal = _extract_wave(path, wave, offset, seconds)
+                if not has_signal:
+                    result = {"segments": []}
+                elif qwen:
                     raw = read_json(cache / "recognition" / f"{index:04d}.json")
                     result = {"segments": adapter.align(wave, raw["text"], seconds)}
                     runtime["computedAlignmentWindows"] += 1
