@@ -160,6 +160,7 @@ def build_app():
     (resources / "backend").mkdir()
     for path in (ROOT / "backend").glob("*.py"):
         shutil.copy2(path, resources / "backend" / path.name)
+    shutil.copy2(ROOT / "backend/asr_catalog.json", resources / "backend/asr_catalog.json")
     for name, mode in [("video-worker", "worker"), ("yt-dlp", "yt-dlp"), ("runtime-check", "self-test")]:
         entry = resources / name
         entry.write_text('#!/bin/sh\nset -eu\nRESOURCE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\n'

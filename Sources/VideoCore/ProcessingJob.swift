@@ -142,6 +142,9 @@ public struct ProcessingRequest: Codable, Sendable {
     public var videoIncludesAudio: Bool
     public var container: String
     public var whisperModel: String
+    /// New tasks use the generic local speech model ID. Missing values preserve legacy requests.
+    public var asrModelID: String?
+    public var effectiveASRModelID: String { asrModelID ?? whisperModel }
     public var summaryStrategy: String?
     public var sourceKind: WorkspaceKind?
     public var localAudioFile: String?

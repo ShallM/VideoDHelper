@@ -64,6 +64,23 @@ class RecordingTests(unittest.TestCase):
         clean_media(self.folder)
         self.assertTrue((self.folder / "source/original.m4a").exists())
 
+    def test_word_timing_speaker_assignment_preserves_original_spacing(self):
+        raw = [{"id": 0, "text": "  GPT 4.1，繁體。 ", "start": 0., "end": 2., "words": [
+            {"word": "  GPT ", "start": 0., "end": 1.},
+            {"word": "4.1，繁體。 ", "start": 1., "end": 2.}]}]
+        aligned = align_speakers(raw, [{"speaker": "A", "start": 0., "end": 1.},
+                                       {"speaker": "B", "start": 1., "end": 2.}])
+        self.assertEqual("".join(s["text"] for s in aligned), raw[0]["text"])
+        self.assertEqual([s["speaker"] for s in aligned], ["A", "B"])
+
+    def test_saved_asr_cannot_be_relabelled_as_another_model(self):
+        write_json(self.folder / "asr-transcript.json", dialogue())
+        write_json(self.folder / "transcription-model.json", {"modelID": "large-v3"})
+        with patch("recording.probe_audio", return_value={"duration": 300}), \
+             patch("recording.transcribe", side_effect=AssertionError("must preserve existing ASR")):
+            with self.assertRaisesRegex(UserError, "不能原地更换"):
+                prepare_transcript(self.request, self.folder, self.root, lambda *a: None)
+
     def test_failed_diarization_keeps_asr_and_off_retry_does_not_retranscribe(self):
         self.request["diarizationMode"] = "two"
         write_json(self.folder / "request.json", self.request)

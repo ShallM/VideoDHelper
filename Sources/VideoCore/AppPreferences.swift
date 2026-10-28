@@ -56,6 +56,10 @@ public struct ModelProvider: Codable, Identifiable, Equatable, Sendable {
 public struct GeneralPreferences: Codable, Equatable, Sendable {
     public var transcriptionMode = "auto"
     public var whisperModel = "turbo"
+    // Optional fields preserve decoding and rollback of pre-manager preferences.
+    public var defaultASRModelID: String? = "turbo"
+    public var asrLegacyNoticePending: Bool?
+    public var effectiveASRModelID: String { defaultASRModelID ?? ASRModelCatalog.defaultModelID }
     public var mediaMode = "needed"
     public var keepMedia = false
     public var container = "mp4"
@@ -99,6 +103,22 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     }
     public var defaultProvider: ModelProvider? { providers.first { $0.id == defaultProviderID } }
     public var defaultModel: LanguageModel? { defaultProvider?.models.first { $0.id == defaultModelID } }
+
+    @discardableResult public mutating func migrateASRPreferences() -> Bool {
+        guard general.defaultASRModelID == nil else { return false }
+        general.defaultASRModelID = ASRModelCatalog.defaultModelID
+        if general.whisperModel == "small" { general.asrLegacyNoticePending = true }
+        return true
+    }
+    public mutating func setDefaultASRModel(_ id: String) throws {
+        guard ASRModelCatalog.primaryIDs.contains(id) else { throw VideoError.toolFailed("请选择当前支持的语音模型。旧版模型仅用于恢复已有任务。") }
+        general.defaultASRModelID = id
+    }
+    /// Merge only immediate ASR settings into a draft, never other unsaved edits.
+    public mutating func mergeASRPreferences(from saved: AppPreferences) {
+        general.defaultASRModelID = saved.general.defaultASRModelID
+        general.asrLegacyNoticePending = saved.general.asrLegacyNoticePending
+    }
 
     public mutating func setDefault(providerID: String, modelID: String) throws {
         guard let provider = providers.first(where: { $0.id == providerID }), provider.enabled,

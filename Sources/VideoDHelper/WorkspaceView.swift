@@ -21,6 +21,7 @@ struct WorkspacePage: View {
     @EnvironmentObject private var preferences: PreferencesStore
     @Environment(\.openSettings) private var openSettings
     @ObservedObject var model: WorkspaceModel
+    @ObservedObject private var speechModels = ASRModelStore.shared
     @Binding var workspace: WorkspaceKind
     let otherIsBusy: Bool
     @State private var editingSegment: TranscriptSegment?
@@ -75,7 +76,11 @@ struct WorkspacePage: View {
         } message: {
             Text("将「\(deletingJob?.title ?? "")」的原稿、笔记、检查点和任务内媒体一起移到 macOS 废纸篓。历史用量与费用保留。\n\n可在 Finder 废纸篓中放回，恢复后位于未归属；清空废纸篓后无法恢复。")
         }
-        .onChange(of: model.isBusy) { _, busy in if busy && model.currentJob != nil { optionsExpanded = false } }
+        .onChange(of: model.isBusy) { _, busy in
+            if busy && model.currentJob != nil { optionsExpanded = false }
+            speechModels.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in speechModels.refresh() }
         .onChange(of: model.currentJob?.id) { _, id in if id != nil { optionsExpanded = false } }
         .onChange(of: model.metadata?.title) { _, _ in optionsExpanded = true }
         .onChange(of: model.selectedTab) { _, _ in model.savePresentation() }
@@ -134,7 +139,9 @@ struct WorkspacePage: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if model.canResume {
-                Button(action: model.resumeJob) { Label("继续处理", systemImage: "arrow.clockwise").frame(maxWidth: .infinity) }
+                Button { startOrManageASR(model.resumeJob) } label: {
+                    Label(needsModelDownload ? "下载所选模型" : "继续处理", systemImage: needsModelDownload ? "arrow.down.circle" : "arrow.clockwise").frame(maxWidth: .infinity)
+                }
                     .buttonStyle(.borderedProminent).disabled(otherIsBusy)
             }
             Divider()
@@ -209,8 +216,8 @@ struct WorkspacePage: View {
                     }.font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Button(action: model.beginProcessing) {
-                Label("生成学习笔记", systemImage: "sparkles").frame(maxWidth: .infinity).padding(.vertical, 4)
+            Button { startOrManageASR(model.beginProcessing) } label: {
+                Label(needsModelDownload ? "下载所选模型" : "生成学习笔记", systemImage: needsModelDownload ? "arrow.down.circle" : "sparkles").frame(maxWidth: .infinity).padding(.vertical, 4)
             }.buttonStyle(.borderedProminent).tint(.teal).disabled(!model.canStart || otherIsBusy)
             Button { preferences.page = .models; openSettings() } label: {
                 HStack(spacing: 6) {
@@ -234,12 +241,11 @@ struct WorkspacePage: View {
                 Text("二人 · 本地区分").tag("two")
                 Text("不区分").tag("off")
             }.disabled(model.isBusy || model.currentJobIsArchived || !model.canTranscribeRecording && model.currentJob != nil)
-            Picker("转录模型", selection: $model.whisperModel) {
-                Text("Large v3 Turbo").tag("turbo")
-                Text("Small").tag("small")
-            }.disabled(model.isBusy || !model.segments.isEmpty)
+            speechModelPicker
             if model.segments.isEmpty || model.canTranscribeRecording {
-                Button(action: model.transcribeRecording) { Label("开始转录", systemImage: "waveform").frame(maxWidth: .infinity) }
+                Button { startOrManageASR(model.transcribeRecording) } label: {
+                    Label(needsModelDownload ? "下载所选模型" : "开始转录", systemImage: needsModelDownload ? "arrow.down.circle" : "waveform").frame(maxWidth: .infinity)
+                }
                     .buttonStyle(.borderedProminent).tint(.teal).disabled(!model.canTranscribeRecording || otherIsBusy)
             }
             if !model.segments.isEmpty {
@@ -349,7 +355,7 @@ struct WorkspacePage: View {
                 }.disabled(model.currentJob != nil)
                 Picker("提取方式", selection: $model.transcriptionMode) {
                     Text("优先平台字幕，缺少时本地转录").tag("auto")
-                    Text("强制本地 Whisper 转录").tag("whisper")
+                    Text("强制本地语音转文字").tag("whisper")
                 }.labelsHidden()
                 if model.transcriptionMode == "auto", let info = model.metadata, !info.tracks.isEmpty {
                     Picker("字幕语言", selection: $model.selectedTrackID) {
@@ -357,11 +363,8 @@ struct WorkspacePage: View {
                     }.labelsHidden()
                     Button("先查看原始字幕", action: model.loadTrack).buttonStyle(.link)
                 } else {
-                    Picker("本地模型", selection: $model.whisperModel) {
-                        Text("Large v3 Turbo · 约 1.6 GB").tag("turbo")
-                        Text("Small · 约 0.5 GB").tag("small")
-                    }.labelsHidden()
-                    Text("优先复用本机模型；缺少时才下载。中文识别使用 MLX / Metal 加速。").font(.caption).foregroundStyle(.secondary)
+                    speechModelPicker
+                    Text("模型需在设置中主动下载，转录使用 MLX / Metal 加速。").font(.caption).foregroundStyle(.secondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: 10) {
@@ -387,6 +390,32 @@ struct WorkspacePage: View {
                     .font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.font(.callout).disabled(model.isBusy)
+    }
+
+    private var needsModelDownload: Bool {
+        model.requiresInstalledASR && !speechModels.isReady(model.whisperModel)
+    }
+
+    private func startOrManageASR(_ action: () -> Void) {
+        if needsModelDownload { preferences.page = .speech; openSettings() }
+        else { action() }
+    }
+
+    private var speechModelPicker: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Picker("转录模型", selection: $model.whisperModel) {
+                if !speechModels.isReady(model.whisperModel) {
+                    Text("\(speechModels.name(model.whisperModel)) · 需下载").tag(model.whisperModel)
+                }
+                ForEach(speechModels.models.filter { $0.isReady && (!$0.legacy || $0.id == model.whisperModel) }) { item in
+                    Text(item.name).tag(item.id)
+                }
+            }.disabled(!model.canChooseASRModel)
+            Button("管理模型…") { preferences.page = .speech; openSettings() }.buttonStyle(.link)
+            if !model.canChooseASRModel && model.currentJob != nil {
+                Text("已开始的任务保留原模型；对比其他模型请新建任务。").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var header: some View {

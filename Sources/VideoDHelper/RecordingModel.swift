@@ -21,6 +21,7 @@ extension WorkspaceModel {
 
     func importRecording(_ url: URL) {
         guard isRecording, !isBusy else { return }
+        let selectedModel = currentJob == nil ? whisperModel : ((try? AppPreferences.load().general.effectiveASRModelID) ?? "turbo")
         start(status: "正在检查录音并保存本机副本…") {
             let ext = url.pathExtension.lowercased()
             guard ["m4a", "mp3", "wav", "aac", "flac", "aiff", "caf"].contains(ext) else {
@@ -53,7 +54,8 @@ extension WorkspaceModel {
             }.value
             var request = ProcessingRequest(title: job.title, url: "", source: job.source, segments: [], useWhisper: true,
                 mediaMode: "needed", keepMedia: true, videoFormatID: "", audioFormatID: "", videoIncludesAudio: false,
-                container: "m4a", whisperModel: self.whisperModel, summaryStrategy: "structured")
+                container: "m4a", whisperModel: selectedModel, summaryStrategy: "structured")
+            request.asrModelID = selectedModel
             request.sourceKind = .recording; request.localAudioFile = relative
             request.recordingAction = "transcribe"; request.diarizationMode = self.diarizationMode
             try Task.checkCancellation()
@@ -61,6 +63,7 @@ extension WorkspaceModel {
             try AppStorage.write(job, to: job.directory.appendingPathComponent("job.json"))
             committed = true
             self.currentJob = job; self.recordingAction = "transcribe"
+            self.whisperModel = selectedModel
             self.metadata = nil; self.link = ""; self.segments = []; self.condensed = []; self.notes = nil
             self.title = job.title; self.source = job.source; self.recordingURL = destination; self.recordingDuration = duration
             self.editsRevision = "original"; self.recordingEditsValid = true
@@ -76,9 +79,10 @@ extension WorkspaceModel {
     func transcribeRecording() {
         guard let job = currentJob, canTranscribeRecording else { return }
         start(status: "准备在本机转录录音…") {
-            var request = try AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json"))
+            try self.requireASRIfNeeded()
+            let saved = try AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json"))
+            var request = try ASRTaskSelection.selecting(self.whisperModel, in: saved, directory: job.directory)
             request.recordingAction = "transcribe"; request.diarizationMode = self.diarizationMode
-            request.whisperModel = self.whisperModel
             try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
             try await self.run(job)
         }
@@ -116,7 +120,7 @@ extension WorkspaceModel {
         if let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")),
            let relative = request.localAudioFile, relative.hasPrefix("source/"), !relative.contains("..") {
             recordingAction = request.recordingAction ?? "transcribe"
-            whisperModel = request.whisperModel
+            whisperModel = request.effectiveASRModelID
             diarizationMode = request.diarizationMode ?? "off"
             struct SourceInfo: Decodable { let duration: Double }
             recordingDuration = (try? AppStorage.read(SourceInfo.self, from: job.directory.appendingPathComponent("recording-source.json")))?.duration ?? 0

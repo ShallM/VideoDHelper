@@ -191,8 +191,8 @@ def align_speakers(segments, turns):
                 groups.append((speaker, []))
             groups[-1][1].append(word)
         for speaker, group in groups:
-            content = "".join(word["word"] for word in group).strip()
-            if content:
+            content = "".join(word["word"] for word in group)
+            if content.strip():
                 result.append({"start": group[0]["start"], "end": group[-1]["end"], "text": content,
                                "speaker": speaker, "words": group})
     result = [{**segment, "id": index} for index, segment in enumerate(result)]
@@ -242,12 +242,17 @@ def prepare_transcript(request, folder, support, emit):
         write_json(manifest_path, manifest)
     asr_path = folder / "asr-transcript.json"
     if asr_path.exists():
+        model_manifest = folder / "transcription-model.json"
+        if model_manifest.exists() and read_json(model_manifest).get("modelID") != (request.get("asrModelID") or request.get("whisperModel", "turbo")):
+            raise UserError("此任务已有其他型号的原稿，不能原地更换转录模型；请新建任务进行对比。")
         segments = read_json(asr_path)
         validate_segments(segments)
         emit("transcript", "复用已完成的本地转录，原音频与词语时间保留。")
     else:
         try:
-            segments = transcribe(path, request.get("whisperModel", "turbo"), folder, support, emit, preserve_word_timing=True)
+            segments = transcribe(path, request.get("asrModelID") or request.get("whisperModel", "turbo"),
+                                  folder, support, emit, preserve_word_timing=True,
+                                  legacy=not bool(request.get("asrModelID")))
         finally:
             release_transcription_model()
         validate_segments(segments)

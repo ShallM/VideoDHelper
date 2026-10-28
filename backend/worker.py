@@ -103,7 +103,8 @@ def run(folder, support, env_file=None):
         elif request["useWhisper"]:
             if media is None:
                 raise UserError("没有取得用于转录的音轨。")
-            segments = transcribe(media, request.get("whisperModel", "turbo"), folder, support, emit)
+            segments = transcribe(media, request.get("asrModelID") or request.get("whisperModel", "turbo"),
+                                  folder, support, emit, legacy=not bool(request.get("asrModelID")))
             save_transcript(folder, segments)
         else:
             segments = request["segments"]
@@ -162,10 +163,16 @@ def main():
                 return
     threading.Thread(target=watch_parent, daemon=True).start()
     parser = argparse.ArgumentParser()
-    parser.add_argument("--job", required=True)
+    operation = parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument("--job")
+    operation.add_argument("--models", choices=("list", "download", "remove", "clear"))
+    parser.add_argument("--model-id")
     parser.add_argument("--support", required=True)
     parser.add_argument("--env-file")
     args = parser.parse_args()
+    if args.models:
+        from asr_models import run_cli
+        return run_cli(args.models, args.model_id, Path(args.support))
     with (Path(args.job) / "run.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

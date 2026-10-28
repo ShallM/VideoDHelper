@@ -5,6 +5,17 @@ import Darwin
 
 @Suite("Application process lifecycle")
 struct ProcessLifecycleTests {
+    @Test func finalFailureEventIsDeliveredBeforeShortWorkerExits() async throws {
+        let buffer = ASRModelEventBuffer()
+        do {
+            _ = try await ProcessRunner.run(path: "/bin/sh", arguments: ["-c", "printf '%s\\n' '{\"stage\":\"error\",\"message\":\"下载失败\"}'; exit 1"]) {
+                buffer.append($0) { _ in }
+            }
+            Issue.record("The worker must report failure")
+        } catch { }
+        #expect(buffer.failure == "下载失败")
+    }
+
     @Test
     func quitStopsOwnedProcessAndRejectsNewLaunches() async throws {
         let registry = ProcessRegistry()

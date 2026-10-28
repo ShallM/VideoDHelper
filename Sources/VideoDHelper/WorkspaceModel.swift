@@ -195,12 +195,30 @@ final class WorkspaceModel: ObservableObject {
     var canStart: Bool { !isBusy && (metadata != nil || (!segments.isEmpty && currentJob == nil)) }
     var currentJobIsArchived: Bool { currentJob.map { library.isArchived($0.id) } ?? false }
     var canResume: Bool { !isBusy && currentJob != nil && currentJob?.state != "completed" && currentJob?.state != "transcribed" && !currentJobIsArchived }
+    var canChooseASRModel: Bool {
+        !isBusy && !currentJobIsArchived && segments.isEmpty
+            && (currentJob.map { !ASRTaskSelection.isFrozen(at: $0.directory) } ?? true)
+    }
+    var asrModelName: String { ASRModelStore.shared.name(whisperModel) }
+    var requiresInstalledASR: Bool {
+        if let job = currentJob, metadata == nil,
+           let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")) {
+            return ASRTaskSelection.needsModel(for: request, directory: job.directory)
+        }
+        return !isRecording && metadata != nil && (transcriptionMode == "whisper" || selectedTrack == nil)
+    }
+    func requireASRIfNeeded() throws {
+        if requiresInstalledASR && !ASRModelStore.shared.isReady(whisperModel) {
+            throw VideoError.toolFailed("「\(asrModelName)」尚不可用，请在设置的“语音转文字”页面下载或修复。任务与已有进度已保留。")
+        }
+    }
     var stageLabel: String {
         switch stage {
         case "prepare": return "准备任务"
         case "download": return "获取媒体"
         case "model": return "准备转录模型"
         case "transcribe": return "本地转录"
+        case "align": return "对齐文字时间"
         case "diarize": return "区分说话人"
         case "transcribed": return "原稿已就绪"
         case "transcript": return "保存原稿"
@@ -230,7 +248,7 @@ final class WorkspaceModel: ObservableObject {
             self.audioFormatID = self.audioFormats.first?.id ?? ""
             self.segments = []; self.notes = nil; self.condensed = []; self.currentJob = nil
             self.title = info.title; self.source = ""
-            self.status = info.tracks.isEmpty ? "未取得字幕；开始后将用本地 Whisper 转录。登录可能解锁平台字幕和更多规格。" : "找到 \(info.tracks.count) 条字幕轨，可直接开始生成学习笔记。"
+            self.status = info.tracks.isEmpty ? "未取得字幕；使用所选本地模型转录前，请确认模型已下载。登录可能解锁平台字幕和更多规格。" : "找到 \(info.tracks.count) 条字幕轨，可直接开始生成学习笔记。"
             self.selectedTab = 0
         }
     }
@@ -251,20 +269,22 @@ final class WorkspaceModel: ObservableObject {
             }
         }
         start(status: "正在准备学习笔记任务…") {
+            try self.requireASRIfNeeded()
             let info = self.metadata
             let useWhisper = info != nil && (self.transcriptionMode == "whisper" || self.selectedTrack == nil)
             if let info, !useWhisper, let track = self.selectedTrack {
                 let values = try await BilibiliProbe.load(track, referer: info.url)
                 self.show(segments: values, title: info.title, source: track.label)
             }
-            let source = useWhisper ? "本地 Whisper · \(self.whisperModel == "turbo" ? "Large v3 Turbo" : "Small") · 中文" : self.source
+            let source = useWhisper ? "本地转录 · \(self.asrModelName) · 中文" : self.source
             let job = ProcessingJob(title: self.title, url: info?.canonicalURL.absoluteString ?? "", source: source, summaryStrategy: self.summaryStrategy)
-            let request = ProcessingRequest(title: job.title, url: job.url, source: source,
+            var request = ProcessingRequest(title: job.title, url: job.url, source: source,
                 segments: useWhisper ? [] : self.segments, useWhisper: useWhisper,
                 mediaMode: info == nil ? "needed" : self.mediaMode, keepMedia: self.keepMedia,
                 videoFormatID: self.videoFormatID, audioFormatID: self.audioFormatID,
                 videoIncludesAudio: self.videoFormats.first(where: { $0.id == self.videoFormatID })?.hasAudio ?? false,
                 container: self.container, whisperModel: self.whisperModel, summaryStrategy: self.summaryStrategy)
+            request.asrModelID = self.whisperModel
             try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
             try AppStorage.write(job, to: job.directory.appendingPathComponent("job.json"))
             self.currentJob = job; self.source = source; self.notes = nil; self.condensed = []; self.historyQuery = ""
@@ -284,7 +304,10 @@ final class WorkspaceModel: ObservableObject {
         if isRecording,
            let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")),
            request.recordingAction != "summarize" { transcribeRecording(); return }
-        start(status: "继续任务，复用已保存的原稿与完成的分段…") { try await self.run(job) }
+        start(status: "继续任务，复用已保存的原稿与完成的分段…") {
+            try self.requireASRIfNeeded()
+            try await self.run(job)
+        }
     }
     func compareSummary(strategy: String) {
         guard let original = currentJob, !isBusy, !segments.isEmpty, !currentJobIsArchived else { return }
@@ -346,6 +369,7 @@ final class WorkspaceModel: ObservableObject {
         notes = try? AppStorage.read(StudyNotes.self, from: job.directory.appendingPathComponent("notes.json"))
         if let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")) {
             summaryStrategy = request.summaryStrategy ?? "legacy"
+            whisperModel = request.effectiveASRModelID
         }
         if workspace == .recording { loadRecording(job) }
         let preferred = (try? AppPreferences.load().general.readingTab) ?? 2
@@ -438,7 +462,7 @@ final class WorkspaceModel: ObservableObject {
     private func applyDefaults() {
         do {
             let value = try AppPreferences.load().general
-            transcriptionMode = value.transcriptionMode; whisperModel = value.whisperModel
+            transcriptionMode = value.transcriptionMode; whisperModel = value.effectiveASRModelID
             mediaMode = value.mediaMode; keepMedia = value.keepMedia; container = value.container
             summaryStrategy = value.effectiveSummaryStrategy
         } catch { self.error = "无法读取默认设置，已保留原文件。请在设置页检查配置。" }

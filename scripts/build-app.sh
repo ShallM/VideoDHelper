@@ -20,6 +20,7 @@ if [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
     chmod +x "$APP_PATH/Contents/Resources/yt-dlp"
     mkdir -p "$APP_PATH/Contents/Resources/backend"
     cp "$PROJECT_ROOT"/backend/*.py "$APP_PATH/Contents/Resources/backend/"
+    cp "$PROJECT_ROOT/backend/asr_catalog.json" "$APP_PATH/Contents/Resources/backend/"
     printf '#!/bin/zsh\nexport PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"\nexec %q -u "${0:A:h}/backend/worker.py" "$@"\n' "$PROJECT_ROOT/.venv/bin/python" > "$APP_PATH/Contents/Resources/video-worker"
     chmod +x "$APP_PATH/Contents/Resources/video-worker"
     if [[ -f "$PROJECT_ROOT/.env" ]]; then
@@ -43,7 +44,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDisplayName</key><string>VideoDHelper</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.7.0</string>
-<key>CFBundleVersion</key><string>14</string>
+<key>CFBundleVersion</key><string>15</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
