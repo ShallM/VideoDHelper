@@ -211,10 +211,11 @@ class ChatClient:
                 headers["Authorization"] = "Bearer " + self.config["apiKey"].strip()
             request = urllib.request.Request(self.endpoint, data=encoded(body).encode(), headers=headers)
             try:
-                # High reasoning can spend several minutes before returning a
-                # non-streaming answer. Respect the run deadline as well.
+                # A large non-streaming answer can take minutes even at low
+                # reasoning effort. Respect the run deadline as well.
                 remaining = self.config.get("summaryTimeoutSeconds", 14400) - (time.monotonic() - self.started)
-                timeout = min(600 if self.reasoning_effort in ("high", "max") else 150, max(1, remaining))
+                long_request = self.reasoning_effort in ("high", "max") or body.get("max_tokens", 0) >= 8192
+                timeout = min(600 if long_request else 150, max(1, remaining))
                 with opener.open(request, timeout=timeout) as response:
                     raw = response.read(8 * 1024 * 1024 + 1)
                 if len(raw) > 8 * 1024 * 1024:

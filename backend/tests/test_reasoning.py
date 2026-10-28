@@ -119,7 +119,7 @@ class ReasoningTests(unittest.TestCase):
         self.assertEqual(body["reasoning_effort"], "max")
 
     def test_high_reasoning_waits_longer_but_timeout_is_never_automatically_retried(self):
-        for effort, timeout in (("low", 150), ("high", 600), ("max", 600)):
+        for effort, timeout in (("low", 600), ("high", 600), ("max", 600)):
             with self.subTest(effort=effort):
                 client = self.client(effort, usageRoot=str(self.folder / effort))
                 opener = Mock()
@@ -135,6 +135,16 @@ class ReasoningTests(unittest.TestCase):
                 event = json.loads(events[0].read_text())
                 self.assertEqual(event["status"], "network_error")
                 self.assertNotIn("inputTokens", event["usage"])
+
+    def test_short_low_effort_request_keeps_short_wait(self):
+        client = self.client("low")
+        opener = Mock()
+        opener.open.side_effect = TimeoutError()
+        with patch("summary.urllib.request.build_opener", return_value=opener):
+            with self.assertRaisesRegex(UserError, "未自动重复提交"):
+                client.complete("prompt", {}, self.validate, output_tokens=1000)
+        self.assertEqual(opener.open.call_count, 1)
+        self.assertEqual(opener.open.call_args.kwargs["timeout"], 150)
 
     def test_wrapped_timeout_and_remaining_run_budget(self):
         client = self.client("high", summaryTimeoutSeconds=30)
