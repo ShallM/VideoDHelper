@@ -23,6 +23,7 @@ CONFIG = json.loads((ROOT / "packaging/runtime.json").read_text())
 SPEAKER_ENGINE = json.loads((ROOT / "packaging/speakerkit.json").read_text())
 CACHE = ROOT / "build/distribution-deps"
 OUTPUT = ROOT / "dist"
+CHANNEL = "release"
 
 
 def run(*args, **kwargs):
@@ -130,6 +131,7 @@ print(json.dumps(sorted(items,key=lambda x:x['name'].lower())))
 
 
 def build_app():
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     python = runtime()
     media, source = ffmpeg()
     run("zsh", ROOT / "scripts/swift-project.sh", "build", "-c", "release")
@@ -175,11 +177,12 @@ def build_app():
             "LSMinimumSystemVersion": CONFIG["minimumMacOS"], "LSArchitecturePriority": ["arm64"],
             "LSRequiresNativeExecution": True, "NSHighResolutionCapable": True, "CFBundleIconFile": "AppIcon",
             "NSHumanReadableCopyright": "Copyright © 2026 ShallM. PolyForm Noncommercial 1.0.0.",
-            "VideoDHelperDistribution": True}
+            "VideoDHelperDistribution": True, "VideoDHelperBuildChannel": CHANNEL,
+            "VideoDHelperSourceRevision": revision}
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
     (resources / "distribution.json").write_text(json.dumps({"version": CONFIG["version"], "architecture": "arm64",
         "minimumMacOS": CONFIG["minimumMacOS"], "notarized": False, "signing": "ad-hoc",
-        "sourceRevision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "sourceRevision": revision, "channel": CHANNEL, "build": CONFIG["build"],
         "runtime": CONFIG, "speakerEngine": SPEAKER_ENGINE}, ensure_ascii=False, indent=2) + "\n")
     # Sign leaves first, then the containing app. No Developer ID is claimed.
     for path in sorted(app.rglob("*")):
@@ -209,11 +212,13 @@ def build_app():
 
 
 def main():
-    global OUTPUT
+    global OUTPUT, CHANNEL
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-only", action="store_true")
     parser.add_argument("--output-dir", type=Path, help="Build into a separate directory, e.g. an ignored local preview folder.")
+    parser.add_argument("--channel", choices=("release", "local-preview"), default="release")
     args = parser.parse_args()
+    CHANNEL = args.channel
     if args.output_dir: OUTPUT = args.output_dir.resolve()
     if os.uname().machine != "arm64":
         raise SystemExit("Build with a native Apple Silicon toolchain.")
