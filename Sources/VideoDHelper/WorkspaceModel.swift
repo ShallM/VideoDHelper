@@ -375,7 +375,8 @@ final class WorkspaceModel: ObservableObject {
                 notes = results.notes; condensed = results.condensed
             } catch {
                 notes = nil; condensed = []
-                self.error = "录音整理成果无法完整读取，已保留原稿与成果文件。请重新整理或恢复成果文件；未混用旧版结果。"
+                self.error = (error as? VideoError)?.localizedDescription
+                    ?? "录音整理成果无法完整读取，已保留原稿与成果文件。请重新整理或恢复成果文件；未混用旧版结果。"
             }
         } else {
             condensed = (try? AppStorage.read([CitedText].self, from: job.directory.appendingPathComponent("condensed.json"))) ?? []

@@ -170,6 +170,9 @@ struct DialogueStrategyTests {
 
     @Test func atomicResultsBundleTakesPriorityOverOlderIndividualFiles() throws {
         let fixture = try DialogueComparisonFixture(); defer { fixture.cleanup() }
+        var request = try AppStorage.read(ProcessingRequest.self, from: fixture.folder.appendingPathComponent("request.json"))
+        request.dialogueStrategy = DialogueStrategy.contextV2.rawValue
+        try AppStorage.write(request, to: fixture.folder.appendingPathComponent("request.json"))
         let notes = #"{"overview":"同一代概览","chapters":[],"key_points":[],"uncertainties":[{"text":"请回听原话。","source_ids":[0],"status":"needs_audio"}],"model":"test","tokensThisRun":0,"summaryStrategy":"context-v2"}"#
         let data = Data("{\"schemaVersion\":1,\"generationID\":\"new-generation\",\"notes\":\(notes),\"condensed\":[{\"text\":\"同一代整理原话\",\"source_ids\":[0]}]}".utf8)
         try data.write(to: fixture.folder.appendingPathComponent("dialogue-results.json"))
@@ -179,6 +182,36 @@ struct DialogueStrategyTests {
         #expect(result.condensed.first?.text == "同一代整理原话")
         let bundle = try JSONDecoder().decode(DialogueResultsBundle.self, from: data)
         #expect(bundle.generationID == "new-generation")
+        try FileManager.default.removeItem(at: fixture.folder.appendingPathComponent("request.json"))
+        #expect(try RecordingResults.load(from: fixture.folder).notes?.overview == "同一代概览")
+    }
+
+    @Test func rollbackStrategyConflictPreservesEveryResultAndAllowsIndependentRecovery() throws {
+        let fixture = try DialogueComparisonFixture(); defer { fixture.cleanup() }
+        let notes = #"{"overview":"回退前的全文理解成果","chapters":[],"key_points":[],"uncertainties":[],"model":"test","tokensThisRun":0,"summaryStrategy":"context-v2"}"#
+        let bundle = Data("{\"schemaVersion\":1,\"generationID\":\"before-rollback\",\"notes\":\(notes),\"condensed\":[{\"text\":\"回退前整理稿\",\"source_ids\":[0]}]}".utf8)
+        try bundle.write(to: fixture.folder.appendingPathComponent("dialogue-results.json"))
+        let legacyNotes = Data(#"{"overview":"旧版重新生成的成果","chapters":[],"key_points":[],"uncertainties":[],"model":"test","tokensThisRun":0,"summaryStrategy":"structured"}"#.utf8)
+        let legacyCondensed = Data(#"[{"text":"旧版重新生成的整理稿","source_ids":[0],"speaker":"A"}]"#.utf8)
+        try legacyNotes.write(to: fixture.folder.appendingPathComponent("notes.json"))
+        try legacyCondensed.write(to: fixture.folder.appendingPathComponent("condensed.json"))
+        let requestURL = fixture.folder.appendingPathComponent("request.json")
+        var request = try AppStorage.read(ProcessingRequest.self, from: requestURL)
+        // The previous app rewrites its Codable request without the new field.
+        for strategy in [nil, "legacy", "future-reader"] as [String?] {
+            request.dialogueStrategy = strategy
+            try AppStorage.write(request, to: requestURL)
+            #expect(throws: (any Error).self) { try RecordingResults.load(from: fixture.folder) }
+        }
+        #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("dialogue-results.json")) == bundle)
+        #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("notes.json")) == legacyNotes)
+        #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("condensed.json")) == legacyCondensed)
+        #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("transcript.json")) == fixture.raw)
+        let comparison = try RecordingComparison.create(taskID: fixture.job.id, strategy: .contextV2, root: fixture.root)
+        let recovered = try RecordingResults.load(from: fixture.directory(comparison.id))
+        #expect(recovered.notes == nil && recovered.condensed.isEmpty)
+        #expect(try Data(contentsOf: fixture.directory(comparison.id).appendingPathComponent("transcript.json")) == fixture.raw)
+        #expect(try AppStorage.read(ProcessingRequest.self, from: fixture.directory(comparison.id).appendingPathComponent("request.json")).effectiveDialogueStrategy == "context-v2")
     }
 
     @Test func damagedOrFutureBundleNeverFallsBackToLegacyFiles() throws {

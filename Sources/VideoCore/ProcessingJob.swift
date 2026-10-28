@@ -254,6 +254,13 @@ public struct RecordingResults: Sendable {
             guard bundle.schemaVersion == 1, !bundle.generationID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw VideoError.toolFailed("录音成果版本无法读取，已保留原文件。")
             }
+            let requestURL = directory.appendingPathComponent("request.json")
+            if FileManager.default.fileExists(atPath: requestURL.path) {
+                let request = try AppStorage.read(ProcessingRequest.self, from: requestURL)
+                guard request.effectiveDialogueStrategy == DialogueStrategy.contextV2.rawValue else {
+                    throw VideoError.toolFailed("录音任务流程与成套成果不一致，可能曾被旧版应用更新。已保留原稿和所有成果文件；请从原稿新建对照任务重新整理，不会自动选择或混用两代结果。")
+                }
+            }
             return RecordingResults(notes: bundle.notes, condensed: bundle.condensed)
         }
         // Older tasks have no bundle. Once a bundle exists, a failed decode must
