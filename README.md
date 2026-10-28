@@ -41,6 +41,8 @@ SpeakerKit 采用 **CPU 与 Apple Neural Engine 混合计算**，并非整条分
 
 使用步骤、恢复规则与已知边界见 **[录音整理指南](docs/recordings.md)**。本轮检查结果与剩余限制见[录音预览验收](docs/validation-recording-preview.md)；正式 Release 仍等待合并与发行验收。
 
+三款本地语音模型的管理、真实录音中断恢复和离线安装包检查，见[ASR 模型管理验收](docs/validation-asr-manager.md)。三款均可运行和接入现有流程，不将单次样本表现作为准确率排名。
+
 <details>
 <summary>查看录音原稿与回听界面（开发预览）</summary>
 

@@ -40,4 +40,6 @@ Qwen 对齐器会清理标点和空白，因此以 **识别原文为正文**，�
 
 推理使用 Apple Silicon MLX / Metal；Metal 不可用时明确停止。`transcription-runtime.json` 记录时间、MLX 峰值分配、计算／复用窗口与时间戳来源。实际内存仍包括运行时和系统分配；时间戳可回听定位，并非人工校准的精确边界。
 
+三模型实录、恢复、离线运行和已知限制见[本轮验收](validation-asr-manager.md)。共有入口跳过完全为零的数字静音，避免这类输入被识别为虚构台词；含背景噪声的音频仍需检查识别结果。
+
 实现依据：[MLX Audio Qwen3-ASR](https://github.com/Blaizzy/mlx-audio/tree/6ce7283be6f15f0cba37e839e73bfa4a08bbf040/mlx_audio/stt/models/qwen3_asr)、[Qwen ForcedAligner](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B)、[Whisper Turbo](https://huggingface.co/openai/whisper-large-v3-turbo)。三模型对照用于验证本机可用性，不预先宣布质量胜出者；话轮重建与总结质量仍按[质量改进计划](recording-quality-plan-2026-10-28.md)单独推进。
