@@ -448,7 +448,7 @@ struct WorkspacePage: View {
                         .font(.caption).foregroundStyle(.secondary)
                     if model.currentJob != nil && !model.segments.isEmpty {
                         Menu {
-                            Button("全文对话理解 · 新方案") { model.compareRecording(strategy: .contextV2) }
+                            Button("全文对话理解 · 预览") { model.compareRecording(strategy: .contextV2) }
                             Button("旧版对话流程 · 基线") { model.compareRecording(strategy: .legacy) }
                         } label: { Label("新建对照任务", systemImage: "square.on.square") }
                             .disabled(!model.canSummarizeRecording || otherIsBusy)

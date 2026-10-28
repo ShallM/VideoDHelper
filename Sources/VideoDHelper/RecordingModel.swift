@@ -43,7 +43,7 @@ extension WorkspaceModel {
             if self.collection == .archived { self.collection = .recent }
             let projectID = self.newTaskProjectID
             var job = ProcessingJob(title: url.deletingPathExtension().lastPathComponent, url: "", source: "手机录音 · 普通话", summaryStrategy: "structured", workspace: .recording)
-            job.dialogueStrategy = DialogueStrategy.contextV2.rawValue
+            job.dialogueStrategy = DialogueStrategy.defaultForNewTasks.rawValue
             let relative = "source/original.\(ext)"
             let destination = job.directory.appendingPathComponent(relative)
             var committed = false
@@ -60,7 +60,7 @@ extension WorkspaceModel {
             request.asrModelID = selectedModel
             request.sourceKind = .recording; request.localAudioFile = relative
             request.recordingAction = "transcribe"; request.diarizationMode = self.diarizationMode
-            request.dialogueStrategy = DialogueStrategy.contextV2.rawValue
+            request.dialogueStrategy = DialogueStrategy.defaultForNewTasks.rawValue
             try Task.checkCancellation()
             try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
             try AppStorage.write(job, to: job.directory.appendingPathComponent("job.json"))

@@ -583,6 +583,7 @@ class Reader:
     def review_all(self):
         for start in range(0, len(self.units), REVIEW_UNIT_BUDGET):
             owned = self.units[start:start + REVIEW_UNIT_BUDGET]
+            self.emit("review", f"原文核验 · 第 {start // REVIEW_UNIT_BUDGET + 1}/{math.ceil(len(self.units) / REVIEW_UNIT_BUDGET)} 批；保留全文背景…")
             owned_ids = {u["id"] for u in owned}
             targets = self.targets()
             selected = [identifier for identifier, target in targets.items()

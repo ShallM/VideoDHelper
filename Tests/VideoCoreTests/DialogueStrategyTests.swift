@@ -49,7 +49,7 @@ struct DialogueStrategyTests {
         request.dialogueStrategy = "context-v2"
         let restored = try JSONDecoder().decode(ProcessingRequest.self, from: JSONEncoder().encode(request))
         #expect(restored.effectiveDialogueStrategy == "context-v2")
-        #expect(DialogueStrategy.label(for: restored.dialogueStrategy) == "全文对话理解")
+        #expect(DialogueStrategy.label(for: restored.dialogueStrategy) == "全文对话理解 · 预览")
     }
 
     @Test func oldSingleSpeakerAndNewMixedPartsRemainReadableWithoutInventingThirdSpeaker() throws {

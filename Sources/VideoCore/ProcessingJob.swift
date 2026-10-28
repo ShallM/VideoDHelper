@@ -171,10 +171,13 @@ public enum DialogueStrategy: String, CaseIterable, Codable, Sendable {
     case legacy
     case contextV2 = "context-v2"
 
+    // The new reader stays opt-in until semantic regression gates are met.
+    public static let defaultForNewTasks: DialogueStrategy = .legacy
+
     public static func label(for value: String?) -> String {
         switch value {
         case nil, Self.legacy.rawValue: return "旧版对话流程"
-        case Self.contextV2.rawValue: return "全文对话理解"
+        case Self.contextV2.rawValue: return "全文对话理解 · 预览"
         default: return "其他对话流程"
         }
     }
