@@ -11,6 +11,7 @@ struct WorkspaceView: View {
     @State private var projectName = ""
     @State private var projectError: String?
     @State private var removingProject: TaskProject?
+    @State private var deletingJob: ProcessingJob?
     @FocusState private var projectNameFocused: Bool
 
     var body: some View {
@@ -43,7 +44,16 @@ struct WorkspaceView: View {
                 if let project = removingProject { model.removeProject(project) }
                 removingProject = nil
             }
-        } message: { Text("「\(removingProject?.name ?? "")」中的任务会移至未归属，原稿、笔记和媒体文件都会保留。") }
+        } message: { Text("「\(removingProject?.name ?? "")」中的任务会解除项目归属，已归档任务仍保留在已归档中。原稿、笔记和媒体文件都会保留。") }
+        .confirmationDialog("删除任务", isPresented: Binding(get: { deletingJob != nil }, set: { if !$0 { deletingJob = nil } }), titleVisibility: .visible) {
+            Button("移到废纸篓", role: .destructive) {
+                if let job = deletingJob { model.trashJob(job) }
+                deletingJob = nil
+            }
+            Button("取消", role: .cancel) { deletingJob = nil }
+        } message: {
+            Text("将「\(deletingJob?.title ?? "")」的原稿、笔记、检查点和任务内媒体一起移到 macOS 废纸篓。历史用量与费用保留。\n\n可在 Finder 废纸篓中放回，恢复后位于未归属；清空废纸篓后无法恢复。")
+        }
         .onChange(of: model.isBusy) { _, busy in if busy && model.currentJob != nil { optionsExpanded = false } }
         .onChange(of: model.currentJob?.id) { _, id in if id != nil { optionsExpanded = false } }
         .onChange(of: model.metadata?.title) { _, _ in optionsExpanded = true }
@@ -117,12 +127,13 @@ struct WorkspaceView: View {
                     Button("全文理解与核验") { model.compareSummary(strategy: "structured") }
                     Button("旧版分块") { model.compareSummary(strategy: "legacy") }
                 } label: { Label("新建对照总结", systemImage: "square.on.square").frame(maxWidth: .infinity) }
-                    .disabled(model.isBusy).help("复用这份原稿，新建独立任务；已有结果保留。会产生新的模型用量。")
+                    .disabled(model.isBusy || model.currentJobIsArchived).help(model.currentJobIsArchived ? "先恢复归档任务，再创建对照总结。" : "复用这份原稿，新建独立任务；已有结果保留。会产生新的模型用量。")
             }
             Divider()
             VStack(spacing: 3) {
                 collectionButton(.recent, title: "最近", icon: "clock")
                 collectionButton(.unassigned, title: "未归属", icon: "tray")
+                collectionButton(.archived, title: "已归档", icon: "archivebox")
             }
             HStack {
                 Text("项目").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -158,7 +169,7 @@ struct WorkspaceView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     if model.visibleHistory.isEmpty {
-                        Text(!model.historyQuery.isEmpty ? "没有匹配的任务。" : model.newTaskProjectID != nil ? "这里还没有任务。\n新任务会保存到当前项目；也可将已有任务移入。" : "这里还没有任务。\n粘贴链接或导入字幕，结果会自动保存。")
+                        Text(!model.historyQuery.isEmpty ? "没有匹配的任务。" : model.collection == .archived ? "还没有归档任务。\n右键任务选择归档，可保留结果并收起已完成的工作。" : model.newTaskProjectID != nil ? "这里还没有任务。\n新任务会保存到当前项目；也可将已有任务移入。" : "这里还没有任务。\n粘贴链接或导入字幕，结果会自动保存。")
                             .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
                     }
                     ForEach(model.visibleHistory) { job in taskRow(job) }
@@ -189,13 +200,29 @@ struct WorkspaceView: View {
                     Spacer()
                     Text(Date(timeIntervalSince1970: job.updatedAt), style: .date)
                 }.font(.caption2).foregroundStyle(.secondary)
-                if model.collection == .recent, let project = model.library.project(for: job.id) {
+                if model.collection == .recent || model.collection == .archived, let project = model.library.project(for: job.id) {
                     Label(project.name, systemImage: "folder").font(.caption2).foregroundStyle(.teal).lineLimit(1)
                 }
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .background(model.currentJob?.id == job.id ? Color.teal.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(.plain).disabled(model.isBusy)
-            .contextMenu { Menu("移至项目") { moveDestinations(job) } }
+            .contextMenu {
+                Menu("移至项目") { moveDestinations(job) }
+                Divider()
+                taskLifecycleActions(job)
+            }
+    }
+
+    @ViewBuilder private func taskLifecycleActions(_ job: ProcessingJob) -> some View {
+        if model.library.isArchived(job.id) {
+            Button { model.restoreJob(job) } label: { Label("恢复任务", systemImage: "arrow.uturn.backward") }
+                .disabled(!model.canManageTasks)
+        } else {
+            Button { model.archiveJob(job) } label: { Label("归档任务", systemImage: "archivebox") }
+                .disabled(!model.canManageTasks)
+        }
+        Button(role: .destructive) { deletingJob = job } label: { Label("删除任务…", systemImage: "trash") }
+            .disabled(!model.canManageTasks)
     }
 
     @ViewBuilder private func moveDestinations(_ job: ProcessingJob) -> some View {
@@ -216,7 +243,7 @@ struct WorkspaceView: View {
     private var projectEditor: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(editingProject == nil ? "新建项目" : "重命名项目").font(.title2.bold())
-            Text("按主题整理视频任务，例如 AI 研究、编程教程。原稿和笔记会随任务一起归档。")
+            Text("按主题整理视频任务，例如 AI 研究、编程教程。移动任务时，原稿和笔记都会保留。")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             TextField("项目名称", text: $projectName).textFieldStyle(.roundedBorder).focused($projectNameFocused)
             if let projectError { Text(projectError).foregroundStyle(.red).font(.caption) }
@@ -292,13 +319,16 @@ struct WorkspaceView: View {
                 } else { Text("字幕优先，保留时间与出处。") }
                 Spacer()
                 if let job = model.currentJob {
+                    if model.currentJobIsArchived { Label("已归档", systemImage: "archivebox").foregroundStyle(.teal) }
                     Menu { moveDestinations(job) } label: {
                         Label(model.library.project(for: job.id)?.name ?? "未归属", systemImage: "folder")
                     }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("移动任务到项目")
                     Menu {
                         Button("在 Finder 中打开任务文件夹", action: model.revealJob)
                         Button("清理本任务媒体（保留文字）", action: model.cleanMedia).disabled(model.isBusy)
-                    } label: { Image(systemName: "folder") }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("任务文件")
+                        Divider()
+                        taskLifecycleActions(job)
+                    } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("任务操作").help("任务文件、归档与删除")
                 } else if model.newTaskProjectID != nil {
                     Label("保存到「\(model.collectionTitle)」", systemImage: "folder")
                 }
@@ -309,9 +339,12 @@ struct WorkspaceView: View {
     private var emptyState: some View {
         VStack(spacing: 15) {
             Image(systemName: model.isBusy ? "waveform" : "text.book.closed").font(.system(size: 44, weight: .light)).foregroundStyle(.teal)
-            Text(model.isBusy ? model.stageLabel : model.currentJob != nil ? "任务已保存，可以继续处理" : model.metadata == nil ? "从一个视频开始" : "视频已准备好").font(.title2.bold())
-            Text(model.isBusy ? "处理过程中可以取消；完成的阶段会留在本机。" : "原始台词、精简台词与学习笔记分别保存。\n技术细节和来源时间一起保留，方便回看核对。")
+            Text(model.isBusy ? model.stageLabel : model.currentJobIsArchived ? "任务已归档" : model.currentJob != nil ? "任务已保存，可以继续处理" : model.metadata == nil ? "从一个视频开始" : "视频已准备好").font(.title2.bold())
+            Text(model.isBusy ? "处理过程中可以取消；完成的阶段会留在本机。" : model.currentJobIsArchived ? "已完成的阶段保留在本机。恢复任务后可以继续处理。" : "原始台词、精简台词与学习笔记分别保存。\n技术细节和来源时间一起保留，方便回看核对。")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
+            if model.currentJobIsArchived, let job = model.currentJob {
+                Button("恢复任务") { model.restoreJob(job) }.disabled(!model.canManageTasks)
+            }
             if model.metadata == nil && !model.isBusy && model.currentJob == nil {
                 Button("也可以导入字幕文件", action: model.importSubtitle)
             }

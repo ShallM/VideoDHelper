@@ -9,6 +9,7 @@ public struct TaskProject: Codable, Identifiable, Equatable, Sendable {
 public enum TaskCollection: Hashable, Sendable {
     case recent
     case unassigned
+    case archived
     case project(String)
 }
 
@@ -17,7 +18,17 @@ public enum TaskCollection: Hashable, Sendable {
 public struct TaskLibrary: Codable, Sendable {
     public private(set) var projects: [TaskProject] = []
     public private(set) var assignments: [String: String] = [:]
+    public private(set) var archivedTaskIDs: Set<String> = []
     public init() {}
+
+    private enum CodingKeys: String, CodingKey { case projects, assignments, archivedTaskIDs }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        projects = try values.decode([TaskProject].self, forKey: .projects)
+        assignments = try values.decode([String: String].self, forKey: .assignments)
+        // Libraries saved before task archiving have no archive field.
+        archivedTaskIDs = try values.decodeIfPresent(Set<String>.self, forKey: .archivedTaskIDs) ?? []
+    }
 
     public static var fileURL: URL { AppStorage.root.appendingPathComponent("library.json") }
 
@@ -25,7 +36,8 @@ public struct TaskLibrary: Codable, Sendable {
         guard FileManager.default.fileExists(atPath: url.path) else { return TaskLibrary() }
         let library = try AppStorage.read(TaskLibrary.self, from: url)
         guard Set(library.projects.map(\.id)).count == library.projects.count,
-              library.projects.allSatisfy({ UUID(uuidString: $0.id) != nil && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+              library.projects.allSatisfy({ UUID(uuidString: $0.id) != nil && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
+              library.archivedTaskIDs.allSatisfy({ UUID(uuidString: $0) != nil }) else {
             throw VideoError.toolFailed("项目目录数据无效；原始任务与结果仍保存在本机。")
         }
         return library
@@ -61,14 +73,28 @@ public struct TaskLibrary: Codable, Sendable {
         assignments[taskID] = projectID
     }
 
+    public func isArchived(_ taskID: String) -> Bool { archivedTaskIDs.contains(taskID) }
+
+    public mutating func setArchived(_ archived: Bool, taskID: String) throws {
+        guard UUID(uuidString: taskID) != nil else { throw VideoError.toolFailed("无效任务编号。") }
+        if archived { archivedTaskIDs.insert(taskID) }
+        else { archivedTaskIDs.remove(taskID) }
+    }
+
+    public mutating func forgetTask(_ taskID: String) {
+        assignments.removeValue(forKey: taskID)
+        archivedTaskIDs.remove(taskID)
+    }
+
     public func tasks(_ jobs: [ProcessingJob], in collection: TaskCollection, matching query: String = "") -> [ProcessingJob] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return jobs.filter { job in
             let included: Bool
             switch collection {
-            case .recent: included = true
-            case .unassigned: included = project(for: job.id) == nil
-            case .project(let id): included = project(for: job.id)?.id == id
+            case .recent: included = !isArchived(job.id)
+            case .unassigned: included = !isArchived(job.id) && project(for: job.id) == nil
+            case .archived: included = isArchived(job.id)
+            case .project(let id): included = !isArchived(job.id) && project(for: job.id)?.id == id
             }
             return included && (query.isEmpty || job.title.localizedCaseInsensitiveContains(query) || job.source.localizedCaseInsensitiveContains(query))
         }.sorted { $0.updatedAt == $1.updatedAt ? $0.id < $1.id : $0.updatedAt > $1.updatedAt }

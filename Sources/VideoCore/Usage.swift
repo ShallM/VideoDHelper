@@ -134,6 +134,7 @@ public enum UsageRepository {
     }
     public static func load(root: URL = AppStorage.root) -> UsageSnapshot {
         var snapshot = UsageSnapshot(), seen = Set<String>()
+        var titles: [String: String] = [:]
         let files = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("usage/events"), includingPropertiesForKeys: nil)) ?? []
         for file in files where file.pathExtension == "json" {
             do {
@@ -142,42 +143,82 @@ public enum UsageRepository {
                 snapshot.events.append(event)
             } catch { snapshot.unreadableRecords += 1 }
         }
-        let jobs = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("tasks"), includingPropertiesForKeys: nil)) ?? []
-        var titles: [String: String] = [:]
-        for folder in jobs where UUID(uuidString: folder.lastPathComponent) != nil {
-            if let job = try? AppStorage.read(ProcessingJob.self, from: folder.appendingPathComponent("job.json")) { titles[folder.lastPathComponent] = job.title }
-            let path = folder.appendingPathComponent("checkpoints/summary/usage.jsonl")
-            guard FileManager.default.fileExists(atPath: path.path) else { continue }
+        // Retain legacy usage independently of disposable task directories.
+        let retained = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("usage/task-history"), includingPropertiesForKeys: nil)) ?? []
+        for file in retained where file.pathExtension == "json" && UUID(uuidString: file.deletingPathExtension().lastPathComponent) != nil {
             do {
-                let data = try Data(contentsOf: path)
-                guard data.count <= 50 * 1024 * 1024, let lines = String(data: data, encoding: .utf8) else {
+                let events = try AppStorage.read([UsageEvent].self, from: file)
+                guard events.allSatisfy({ $0.taskID == file.deletingPathExtension().lastPathComponent && $0.schemaVersion == 1 && $0.timestamp.isFinite }) else {
                     snapshot.unreadableRecords += 1; continue
                 }
-                for (index, line) in lines.split(separator: "\n").enumerated() {
-                    guard let raw = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                          let timestamp = raw["time"] as? Double, timestamp.isFinite else { snapshot.unreadableRecords += 1; continue }
-                    let hash = SHA256.hash(data: Data("\(folder.lastPathComponent):\(index):\(line)".utf8)).map { String(format: "%02x", $0) }.joined()
-                    let id = raw["eventID"] as? String ?? "legacy-\(hash)"
-                    guard seen.insert(id).inserted else { continue }
-                    var event = UsageEvent(id: id, timestamp: timestamp, purpose: "summary")
-                    event.taskID = folder.lastPathComponent; event.status = "response"
-                    event.usage = TokenUsage(response: raw["usage"] as? [String: Any] ?? [:])
-                    event.finishReason = raw["finish_reason"] as? String
-                    // Old logs had no reliable model identity. Never infer it from current settings or final notes.
-                    event.providerID = raw["providerID"] as? String; event.providerName = raw["providerName"] as? String
-                    event.modelConfigID = raw["modelConfigID"] as? String; event.modelID = raw["modelID"] as? String
-                    event.modelName = raw["modelName"] as? String
-                    if let pricing = raw["pricing"], let data = try? JSONSerialization.data(withJSONObject: pricing) {
-                        event.pricing = try? JSONDecoder().decode(TokenPricing.self, from: data)
-                    }
-                    snapshot.events.append(event)
-                }
+                if let title = events.compactMap(\.taskTitle).first { titles[file.deletingPathExtension().lastPathComponent] = title }
+                snapshot.events += events.filter { seen.insert($0.id).inserted }
             } catch { snapshot.unreadableRecords += 1 }
+        }
+        let jobs = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("tasks"), includingPropertiesForKeys: nil)) ?? []
+        for folder in jobs where UUID(uuidString: folder.lastPathComponent) != nil {
+            if let job = try? AppStorage.read(ProcessingJob.self, from: folder.appendingPathComponent("job.json")) { titles[folder.lastPathComponent] = job.title }
+            let legacy = legacyHistory(in: folder)
+            snapshot.unreadableRecords += legacy.unreadableRecords
+            snapshot.events += legacy.events.filter { seen.insert($0.id).inserted }
         }
         for index in snapshot.events.indices {
             if let taskID = snapshot.events[index].taskID { snapshot.events[index].taskTitle = titles[taskID] ?? snapshot.events[index].taskTitle }
         }
         snapshot.events.sort { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp > $1.timestamp }
+        return snapshot
+    }
+
+    static func preserveTaskHistory(taskID: String, root: URL) throws {
+        let folder = root.appendingPathComponent("tasks/\(taskID)")
+        let legacy = legacyHistory(in: folder)
+        guard legacy.unreadableRecords == 0 else {
+            throw VideoError.toolFailed("任务的旧版用量记录无法完整读取，暂未删除。可先归档任务，保留原始记录。")
+        }
+        let files = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("usage/events"), includingPropertiesForKeys: nil)) ?? []
+        let modern = files.filter { $0.pathExtension == "json" }.compactMap { try? AppStorage.read(UsageEvent.self, from: $0) }
+            .filter { $0.taskID == taskID && $0.schemaVersion == 1 && $0.timestamp.isFinite }
+        guard !legacy.events.isEmpty || !modern.isEmpty else { return }
+        let path = root.appendingPathComponent("usage/task-history/\(taskID).json")
+        var saved = FileManager.default.fileExists(atPath: path.path) ? try AppStorage.read([UsageEvent].self, from: path) : []
+        guard saved.allSatisfy({ $0.taskID == taskID && $0.schemaVersion == 1 && $0.timestamp.isFinite }) else {
+            throw VideoError.toolFailed("历史用量副本无法读取，暂未删除任务。")
+        }
+        let job = try AppStorage.read(ProcessingJob.self, from: folder.appendingPathComponent("job.json"))
+        var seen = Set(saved.map(\.id))
+        for event in modern + legacy.events where seen.insert(event.id).inserted { saved.append(event) }
+        for index in saved.indices { saved[index].taskTitle = job.title }
+        try AppStorage.write(saved, to: path)
+    }
+
+    private static func legacyHistory(in folder: URL) -> UsageSnapshot {
+        var snapshot = UsageSnapshot()
+        let path = folder.appendingPathComponent("checkpoints/summary/usage.jsonl")
+        guard FileManager.default.fileExists(atPath: path.path) else { return snapshot }
+        do {
+            let data = try Data(contentsOf: path)
+            guard data.count <= 50 * 1024 * 1024, let lines = String(data: data, encoding: .utf8) else {
+                snapshot.unreadableRecords += 1; return snapshot
+            }
+            for (index, line) in lines.split(separator: "\n").enumerated() {
+                guard let raw = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                      let timestamp = raw["time"] as? Double, timestamp.isFinite else { snapshot.unreadableRecords += 1; continue }
+                let hash = SHA256.hash(data: Data("\(folder.lastPathComponent):\(index):\(line)".utf8)).map { String(format: "%02x", $0) }.joined()
+                let id = raw["eventID"] as? String ?? "legacy-\(hash)"
+                var event = UsageEvent(id: id, timestamp: timestamp, purpose: "summary")
+                event.taskID = folder.lastPathComponent; event.status = "response"
+                event.usage = TokenUsage(response: raw["usage"] as? [String: Any] ?? [:])
+                event.finishReason = raw["finish_reason"] as? String
+                // Never infer a legacy request's model or price from current settings.
+                event.providerID = raw["providerID"] as? String; event.providerName = raw["providerName"] as? String
+                event.modelConfigID = raw["modelConfigID"] as? String; event.modelID = raw["modelID"] as? String
+                event.modelName = raw["modelName"] as? String
+                if let pricing = raw["pricing"], let data = try? JSONSerialization.data(withJSONObject: pricing) {
+                    event.pricing = try? JSONDecoder().decode(TokenPricing.self, from: data)
+                }
+                snapshot.events.append(event)
+            }
+        } catch { snapshot.unreadableRecords += 1 }
         return snapshot
     }
 

@@ -41,6 +41,22 @@ DMG 是只读磁盘映像，挂载后在 Finder 中看起来像一个外置磁�
 
 卸载时退出应用，再把 `/Applications/VideoDHelper.app` 移到废纸篓。个人数据默认保留；如也要移除数据，请先导出所需笔记，并在设置的存储位置中找到自己的数据目录后自行处理。数据与凭据说明见 [隐私文档](privacy.md)。
 
+## 本机开发预览版
+
+维护者的日常应用保持最新的已验证预览版，用于在正式合并前体验功能。每轮开发完成后更新同一个 `/Applications/VideoDHelper.app`，无须并排安装不同版本；PR 保持待合并，待维护者确认后再完成正式发行。这个流程由开发交付时执行，应用目前没有后台自动升级服务。
+
+| 内容 | 位置与保留规则 |
+| --- | --- |
+| 日常使用的应用 | `/Applications/VideoDHelper.app`，始终一份，原位更新 |
+| 上一版应用的回退包 | 项目内 `local-data/preview-install/previous.zip`，只保留一份压缩包；版本与校验信息在 `previous.json` |
+| 任务、设置、登录信息与模型 | 原 `~/Library/Application Support/VideoDHelper/`，与应用包分开保存 |
+| 开发日志与验收资料 | 保留对应开发记录、截图、报告；不再使用的候选 / 测试 `.app` 可清理 |
+| 正式版本 | `dist/` 保留最近发行产物，历史版本由 GitHub Releases 和 Git 标签追溯 |
+
+替换前验证候选包，并准备上一版的备份；安装后确认启动、任务读取、相关功能与退出正常，再轮换旧回退包。回退时退出应用，将压缩包解开后替换安装副本。回退包只恢复应用程序；如果数据格式发生不兼容迁移，需要使用对应的数据备份，不能假定旧应用一定可以读取新数据。
+
+2026-10-28 的本地预览显示为 **0.6.1（构建 8）**，对应 `c9adfa6` 的任务归档与删除功能；其渠道记录为 `local-preview`。当前 GitHub 正式 Release 仍为 **0.6.0**，两者不混同。后续预览以实际安装记录为准。
+
 ## 核验与其他附件
 
 Release 提供 `SHA256SUMS.txt`、`build-manifest.json`、`third-party-components.json` 及对应第三方源码压缩包。下载到同一目录后可用 `shasum -a 256 -c SHA256SUMS.txt` 核对；只下载 DMG 时，可用 `shasum -a 256 VideoDHelper-0.6.0-macOS-arm64.dmg` 与清单对应行比较。

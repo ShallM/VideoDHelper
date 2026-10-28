@@ -3,6 +3,29 @@ import Testing
 @testable import VideoCore
 
 struct TaskLibraryTests {
+    @Test func oldLibraryDecodesAndArchivesStayOutOfActiveCollections() throws {
+        var library = try JSONDecoder().decode(TaskLibrary.self, from: Data(#"{"projects":[],"assignments":{}}"#.utf8))
+        let project = try library.createProject(name: "研究")
+        let job = ProcessingJob(title: "Attention", url: "", source: "Whisper")
+        try library.moveTask(job.id, to: project.id)
+        try library.setArchived(true, taskID: job.id)
+        #expect(library.tasks([job], in: .recent).isEmpty)
+        #expect(library.tasks([job], in: .unassigned).isEmpty)
+        #expect(library.tasks([job], in: .project(project.id)).isEmpty)
+        #expect(library.tasks([job], in: .archived, matching: "attention").map(\.id) == [job.id])
+        #expect(library.tasks([job], in: .archived, matching: "missing").isEmpty)
+        let decoded = try JSONDecoder().decode(TaskLibrary.self, from: JSONEncoder().encode(library))
+        #expect(decoded.isArchived(job.id))
+        #expect(decoded.project(for: job.id)?.id == project.id)
+        try library.renameProject(project.id, name: "新名称")
+        #expect(library.project(for: job.id)?.name == "新名称")
+        library.removeProject(project.id)
+        #expect(library.isArchived(job.id))
+        #expect(library.tasks([job], in: .unassigned).isEmpty)
+        try library.setArchived(false, taskID: job.id)
+        #expect(library.tasks([job], in: .unassigned).map(\.id) == [job.id])
+    }
+
     @Test func existingTasksStartUnassignedAndRemainInRecent() throws {
         let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("library.json")
         var library = try TaskLibrary.load(from: missing)
