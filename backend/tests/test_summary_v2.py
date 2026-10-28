@@ -220,7 +220,7 @@ class EngineTests(unittest.TestCase):
         def response(client, body, phase="summary"):
             calls.append(body["max_tokens"])
             if body["max_tokens"] == 16384:
-                return {"choices": [{"finish_reason": "length", "message": {"content": ""}}],
+                return {"choices": [{"finish_reason": "length", "message": {"content": '{"valid":'}}],
                         "usage": {"prompt_tokens": 100, "completion_tokens": 16384, "total_tokens": 16484}}
             return {"choices": [{"finish_reason": "stop", "message": {"content": '{"valid":true}'}}]}
         with patch.object(ChatClient, "_request", autospec=True, side_effect=response):
@@ -243,7 +243,7 @@ class EngineTests(unittest.TestCase):
             payload = json.loads(body["messages"][1]["content"])
             calls.append(payload)
             if payload == [0, 1]:
-                return {"choices": [{"finish_reason": "length", "message": {"content": ""}}],
+                return {"choices": [{"finish_reason": "length", "message": {"content": '{"valid":'}}],
                         "usage": {"prompt_tokens": 100, "completion_tokens": 8192, "total_tokens": 8292}}
             return {"choices": [{"finish_reason": "stop", "message": {"content": '{"valid":true}'}}]}
         def resume(client):

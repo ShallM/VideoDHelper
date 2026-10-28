@@ -269,7 +269,7 @@ struct SettingsView: View {
                 ForEach(provider.models) { model in
                     modelCard(model, provider: provider)
                 }
-                Text("测试会发起一次简短模型调用，并计入用量。价格按每百万 Tokens 填写；未配置时仅统计用量。").font(.caption).foregroundStyle(.secondary).lineSpacing(3)
+                Text("测试会发起一次模型调用，并计入用量；较高思考强度可能消耗更多输出 Tokens。测试通过表示请求被接收，不保证服务商后台执行了对应强度。").font(.caption).foregroundStyle(.secondary).lineSpacing(3)
                 if provider.id != editor.draft.defaultProviderID {
                     Button("移除此服务商…", role: .destructive) { removingProvider = provider }.buttonStyle(.link).padding(.top, 6)
                 }
@@ -283,6 +283,17 @@ struct SettingsView: View {
                 Spacer()
                 if model.id == editor.draft.defaultModelID { Text("默认").font(.caption.weight(.medium)).foregroundStyle(.teal).padding(.horizontal, 9).padding(.vertical, 4).background(.teal.opacity(0.1), in: Capsule()) }
             }
+            HStack {
+                Label("思考强度", systemImage: "brain").font(.caption).foregroundStyle(.secondary)
+                Picker("\(model.name) 的思考强度", selection: Binding(get: { model.reasoningEffort }, set: { effort in
+                    guard let p = editor.draft.providers.firstIndex(where: { $0.id == provider.id }),
+                          let m = editor.draft.providers[p].models.firstIndex(where: { $0.id == model.id }) else { return }
+                    editor.draft.providers[p].models[m].reasoningEffort = effort
+                })) {
+                    ForEach(ReasoningEffort.options(for: model.modelID)) { effort in Text(effort.label).tag(effort.rawValue) }
+                }.labelsHidden().frame(width: 145)
+                Spacer()
+            }.controlSize(.small)
             HStack {
                 Label(model.pricing.isConfigured ? "\(model.pricing.currency) · 已配置单价" : "未配置价格", systemImage: "tag").font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -371,8 +382,21 @@ struct ModelEditorSheet: View {
             Form {
                 TextField("模型 ID", text: $draft.modelID)
                 TextField("显示名称", text: $draft.name)
-                Picker("推理强度", selection: $draft.reasoningEffort) { Text("低 · 适合内容整理").tag("low"); Text("服务商默认 · 兼容模式").tag("default") }
+                Picker("思考强度", selection: $draft.reasoningEffort) {
+                    ForEach(ReasoningEffort.options(for: draft.modelID)) { effort in
+                        Text(effort == .providerDefault ? effort.label : "\(effort.label) · \(effort.rawValue)").tag(effort.rawValue)
+                    }
+                    if !ReasoningEffort.options(for: draft.modelID).contains(where: { $0.rawValue == draft.reasoningEffort }) {
+                        Text("\(draft.reasoningEffortLabel) · 请重新选择").tag(draft.reasoningEffort)
+                    }
+                }
             }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(ReasoningEffort(rawValue: draft.reasoningEffort)?.detail ?? "请重新选择思考强度。")
+                Text(ReasoningEffort.isDeepSeekV4(draft.modelID)
+                     ? "DeepSeek V4 官方档位为低、高、最高；中档会映射为高。通过代理调用时，仍需核对服务商支持情况。"
+                     : "这是 OpenAI 兼容接口的请求选项，并非已验证的模型能力。不支持时会明确报错，可自行改用服务商默认。")
+            }.font(.caption).foregroundStyle(.secondary).lineSpacing(3)
             SettingsCard(title: "价格表", subtitle: "每百万 Tokens 的单价。留空为未配置，填 0 表示免费。", icon: "tag") {
                 HStack { Text("币种").font(.callout); Spacer(); Picker("计费币种", selection: $draft.pricing.currency) { Text("人民币 CNY").tag("CNY"); Text("美元 USD").tag("USD"); Text("欧元 EUR").tag("EUR"); Text("港币 HKD").tag("HKD"); Text("日元 JPY").tag("JPY") }.labelsHidden().frame(width: 180) }
                 HStack(spacing: 16) { priceField("输入", text: $inputPrice, placeholder: "未配置"); priceField("输出", text: $outputPrice, placeholder: "未配置") }
@@ -393,6 +417,7 @@ struct ModelEditorSheet: View {
             model.name = model.name.trimmingCharacters(in: .whitespacesAndNewlines)
             if model.name.isEmpty { model.name = model.modelID }
             guard !model.modelID.isEmpty, model.modelID.count <= 200, model.name.count <= 100, !otherIDs.contains(model.modelID) else { throw VideoError.toolFailed("请输入不重复的模型 ID（最多 200 字符），名称最多 100 字符。") }
+            _ = try ReasoningEffort.validated(model.reasoningEffort, modelID: model.modelID)
             model.pricing = try TokenPricing.fromInput(currency: model.pricing.currency, input: inputPrice, output: outputPrice, cached: cachedPrice)
             onSave(model); dismiss()
         } catch { self.error = error.localizedDescription }

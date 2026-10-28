@@ -40,6 +40,7 @@ public struct LanguageModel: Codable, Identifiable, Equatable, Sendable {
     public init(modelID: String, name: String? = nil) {
         self.modelID = modelID; self.name = name ?? modelID
     }
+    public var reasoningEffortLabel: String { ReasoningEffort(rawValue: reasoningEffort)?.label ?? "无效强度" }
 }
 
 public struct ModelProvider: Codable, Identifiable, Equatable, Sendable {
@@ -135,10 +136,10 @@ public struct AppPreferences: Codable, Equatable, Sendable {
                 guard UUID(uuidString: model.id) != nil, modelIDs.insert(model.id).inserted,
                       !model.modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       model.modelID.count <= 200, !model.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      model.name.count <= 100, identifiers.insert(model.modelID).inserted,
-                      ["low", "default"].contains(model.reasoningEffort) else {
+                      model.name.count <= 100, identifiers.insert(model.modelID).inserted else {
                     throw VideoError.toolFailed("模型 ID / 名称无效或重复，请检查模型列表。")
                 }
+                _ = try ReasoningEffort.validated(model.reasoningEffort, modelID: model.modelID)
                 try model.pricing.validate()
             }
         }

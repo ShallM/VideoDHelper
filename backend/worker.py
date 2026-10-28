@@ -45,6 +45,15 @@ def load_config(support, env_file=None):
 
 
 def validate_request(request):
+    kind = request.get("sourceKind", "bilibili")
+    if kind not in ("bilibili", "recording"):
+        raise UserError("任务来源类型无效。")
+    if kind == "recording":
+        if request.get("recordingAction", "transcribe") not in ("transcribe", "summarize") or request.get("diarizationMode", "off") not in ("two", "off"):
+            raise UserError("录音处理选项无效。")
+        if not isinstance(request.get("title"), str) or not request["title"].strip():
+            raise UserError("录音标题无效。")
+        return
     if request.get("mediaMode") not in ("needed", "audio", "video") or type(request.get("keepMedia")) is not bool:
         raise UserError("任务的媒体选项无效。")
     if request.get("summaryStrategy", "legacy") not in ("legacy", "structured", "compact"):
@@ -62,6 +71,8 @@ def run(folder, support, env_file=None):
     record = read_json(folder / "job.json")
     if record["id"] != folder.name:
         raise UserError("任务目录与记录不匹配。")
+    if record.get("sourceKind", "bilibili") != request.get("sourceKind", "bilibili"):
+        raise UserError("任务来源与记录不匹配。")
 
     def emit(stage, message, progress=None):
         record.update(stage=stage, message=message, progress=progress, updatedAt=time.time(), state="running")
@@ -70,6 +81,10 @@ def run(folder, support, env_file=None):
 
     try:
         emit("prepare", "准备任务，检查已完成的阶段…")
+        if request.get("sourceKind") == "recording":
+            # Local ASR and diarization must not require valid cloud settings.
+            from recording import run_recording
+            return run_recording(request, record, folder, support, emit, load_config, env_file)
         # Snapshot settings at the beginning. Editing settings affects the next run, not a running transcription.
         config = load_config(support, env_file)
         config.update(taskID=record["id"], taskTitle=request["title"])

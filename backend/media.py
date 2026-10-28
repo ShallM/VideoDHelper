@@ -169,7 +169,12 @@ def owned_words(result, offset, lower, upper):
         # MLX word timing can use NumPy scalars; normalize at the JSON boundary.
         start, end = float(start), float(end)
         if content and math.isfinite(start) and math.isfinite(end):
-            segments.append({"start": float(max(lower, start)), "end": float(min(upper, max(start, end))), "text": content})
+            segment = {"start": float(max(lower, start)), "end": float(min(upper, max(start, end))), "text": content}
+            if selected:
+                segment["words"] = [{"start": float(max(segment["start"], w["start"] + offset)),
+                                     "end": float(min(segment["end"], max(w["start"], w["end"]) + offset)),
+                                     "word": w["word"]} for w in selected]
+            segments.append(segment)
     return segments
 
 
@@ -223,7 +228,7 @@ def plan_windows(path, duration, folder, identity, emit):
     return plan
 
 
-def transcribe(path, name, folder, support, emit):
+def transcribe(path, name, folder, support, emit, preserve_word_timing=False):
     if sys.platform != "darwin" or os.uname().machine != "arm64":
         raise UserError("本次本地 Whisper 引擎需要 Apple Silicon Mac；Intel Mac 可使用平台或导入字幕。")
     import mlx.core as mx
@@ -248,7 +253,9 @@ def transcribe(path, name, folder, support, emit):
     with path.open("rb") as file:
         for block in iter(lambda: file.read(1024 * 1024), b""):
             file_hash.update(block)
-    identity = digest({"sha256": file_hash.hexdigest(), "model": name, "version": 2})
+    # Recording jobs require word timings for speaker alignment. Existing video
+    # tasks retain their v2 checkpoint identity and remain resumable unchanged.
+    identity = digest({"sha256": file_hash.hexdigest(), "model": name, "version": 3 if preserve_word_timing else 2})
     plan = plan_windows(path, duration, folder, identity, emit)
     cache = folder / "checkpoints" / "whisper" / identity
     temporary = folder / "temporary"
@@ -299,3 +306,17 @@ def transcribe(path, name, folder, support, emit):
     runtime["completed"] = True
     save_runtime(duration)
     return [{"id": i, **s} for i, s in enumerate(all_segments)]
+
+
+def release_transcription_model():
+    """Drop the process-local Whisper cache before another local model loads."""
+    import gc
+    module = sys.modules.get("mlx_whisper.transcribe")
+    holder = getattr(module, "ModelHolder", None)
+    if holder is not None:
+        holder.model = None
+        holder.model_path = None
+    gc.collect()
+    mx = sys.modules.get("mlx.core")
+    if mx is not None and hasattr(mx, "clear_cache"):
+        mx.clear_cache()

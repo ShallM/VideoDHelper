@@ -19,8 +19,7 @@ public enum ProviderAPI {
     public static func test(provider: ModelProvider, model: LanguageModel, root: URL = AppStorage.root) async throws -> String {
         var request = try makeRequest(provider, path: "chat/completions")
         request.httpMethod = "POST"
-        var body: [String: Any] = ["model": model.modelID, "messages": [["role": "user", "content": "Reply with exactly OK."]], "stream": false, "max_tokens": 512]
-        if model.reasoningEffort == "low" { body["reasoning_effort"] = "low" }
+        let body = try connectionTestBody(model: model)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         var event = UsageEvent(provider: provider, model: model)
         try UsageRepository.save(event, root: root)
@@ -35,12 +34,8 @@ public enum ProviderAPI {
             event.status = (200..<300).contains(response.statusCode) ? (choice == nil ? "invalid_response" : "response") : "http_error"
             try UsageRepository.save(event, root: root)
             try checkStatus(response.statusCode)
-            guard choice != nil else { throw VideoError.toolFailed("连接已返回，但没有有效的模型响应；用量已记录。") }
-            if reason == "length" { return "模型可访问 · 测试输出达到上限，用量已记录。" }
-            guard reason == "stop", let message = choice?["message"] as? [String: Any], let content = message["content"] as? String, !content.isEmpty else {
-                throw VideoError.toolFailed("模型未正常完成测试，请检查模型兼容性；用量已记录。")
-            }
-            return String(format: "连接正常 · %.1f 秒 · %@", event.durationSeconds ?? 0,
+            try validateTestCompletion(choice)
+            return String(format: "连接正常 · 请求强度：%@ · %.1f 秒 · %@", model.reasoningEffortLabel, event.durationSeconds ?? 0,
                           event.usage.totalTokens.map { "\($0) Tokens" } ?? "服务商未返回用量")
         } catch {
             if event.status == "in_flight" {
@@ -51,6 +46,31 @@ public enum ProviderAPI {
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
             if let error = error as? VideoError { throw error }
             throw VideoError.toolFailed("连接超时或响应无效，请检查 API 地址、网络与模型配置。")
+        }
+    }
+
+    static func connectionTestBody(model: LanguageModel) throws -> [String: Any] {
+        let effort = try ReasoningEffort.validated(model.reasoningEffort, modelID: model.modelID)
+        var body: [String: Any] = ["model": model.modelID, "messages": [["role": "user", "content": "Reply with exactly OK."]],
+                                   "stream": false, "max_tokens": effort.connectionTestBudget]
+        if let parameter = try ReasoningEffort.parameter(model.reasoningEffort, modelID: model.modelID) {
+            body["reasoning_effort"] = parameter
+        }
+        return body
+    }
+
+    static func validateTestCompletion(_ choice: [String: Any]?) throws {
+        guard let choice else { throw VideoError.toolFailed("连接已返回，但没有有效的模型响应；用量已记录。") }
+        if choice["finish_reason"] as? String == "length" {
+            throw VideoError.toolFailed("服务商已响应，但测试输出达到上限，尚未完成验证。可降低思考强度后重试；用量已记录。")
+        }
+        let message = choice["message"] as? [String: Any]
+        let content = (message?["content"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if content.isEmpty, let reasoning = message?["reasoning_content"] as? String, !reasoning.isEmpty {
+            throw VideoError.toolFailed("模型只返回推理过程，没有测试正文，尚未完成验证。请检查输出预算与模型兼容性；用量已记录。")
+        }
+        guard choice["finish_reason"] as? String == "stop", !content.isEmpty else {
+            throw VideoError.toolFailed("模型未正常完成测试，请检查模型兼容性；用量已记录。")
         }
     }
 

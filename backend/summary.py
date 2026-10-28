@@ -44,6 +44,18 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def reasoning_effort(config):
+    """Validate a requested strength without silently dropping or remapping it."""
+    value = config.get("reasoningEffort", "low")
+    if not isinstance(value, str) or value not in ("default", "low", "medium", "high", "max"):
+        raise UserError("思考强度无效，请在模型配置中重新选择。")
+    model = config.get("model", "").lower()
+    deepseek_v4 = "deepseek" in model and ("v4" in model or model.endswith("deepseek-flash"))
+    if deepseek_v4 and value == "medium":
+        raise UserError("DeepSeek V4 没有独立的中档；请明确选择低、高、最高或服务商默认。")
+    return value
+
+
 class ChatClient:
     def __init__(self, config, directory, emit):
         self.config, self.directory, self.emit = config, directory, emit
@@ -55,6 +67,7 @@ class ChatClient:
             raise UserError("原稿已保存。请在设置中填写 API Key，再点继续处理。")
         if not config.get("model", "").strip():
             raise UserError("请在设置中填写模型名称。")
+        self.reasoning_effort = reasoning_effort(config)
         self.endpoint = config["baseURL"].rstrip("/") + "/chat/completions"
         self.total_tokens = 0
         self.usage_lock = threading.Lock()
@@ -82,7 +95,7 @@ class ChatClient:
 
     def complete(self, prompt, payload, validator, output_tokens=8192, phase=None):
         identity = {"version": self.config.get("summaryVersion", VERSION), "base": self.endpoint, "model": self.config["model"],
-                    "effort": self.config.get("reasoningEffort", "low"), "prompt": prompt, "payload": payload}
+                    "effort": self.reasoning_effort, "prompt": prompt, "payload": payload}
         if self.config.get("summaryVersion"):
             identity["output_tokens"] = output_tokens
         phase = phase or ("chunk" if prompt.startswith(CHUNK_PROMPT) else "reduce" if prompt.startswith(REDUCE_PROMPT) else "stitch" if prompt.startswith(MERGE_PROMPT) else "overview")
@@ -98,6 +111,8 @@ class ChatClient:
                 return value
             except (ValueError, KeyError, TypeError):
                 path.unlink()
+        if limit_path.exists() and read_json(limit_path).get("kind") == "no_final_output":
+            raise UserError("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
         if (self.config.get("summaryVersion") and limit_path.exists()) or path.stem in self.known_output_limits:
             # A resumable fallback must not pay for the same known-too-small
             # output budget again before reaching its successful checkpoint.
@@ -109,8 +124,8 @@ class ChatClient:
         for validation_attempt in range(2):
             body = {"model": self.config["model"], "stream": False, "max_tokens": output_tokens,
                     "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": encoded(payload)}]}
-            if self.config.get("reasoningEffort", "low") == "low":
-                body["reasoning_effort"] = "low"
+            if self.reasoning_effort != "default":
+                body["reasoning_effort"] = self.reasoning_effort
             if validation_attempt:
                 body["messages"][0]["content"] += " 上次结构或来源检查未通过，请严格满足JSON字段及来源编号约束。" + feedback
             started = time.monotonic()
@@ -132,24 +147,37 @@ class ChatClient:
                     self.total_tokens += normalized_usage.get("reportedTotalTokens", normalized_usage.get("inputTokens", 0) + normalized_usage.get("outputTokens", 0))
                 with log.open("a", encoding="utf-8") as file:
                     entry = {"time": time.time(), "step": path.stem, "usage": usage,
-                             "finish_reason": choice.get("finish_reason"), "modelID": self.config["model"],
+                             "finish_reason": choice.get("finish_reason"), "modelID": self.config["model"], "reasoningEffort": self.reasoning_effort,
                              "phase": phase, "durationSeconds": round(time.monotonic() - started, 3)}
                     if result.get("_videohelper_event_id"):
                         entry["eventID"] = result["_videohelper_event_id"]
                     for key in ("providerID", "providerName", "modelConfigID", "modelName", "pricing"):
                         if key in self.config:
                             entry[key] = self.config[key]
+                    source = self.config.get("sourceKind")
+                    if source is not None:
+                        entry["sourceKind"] = source if source in ("bilibili", "recording") else "unknown"
+                    elif self.config.get("taskID"):
+                        entry["sourceKind"] = "bilibili"
                     file.write(encoded(entry) + "\n")
-                self.calls.append({"phase": phase, "checkpoint": path.stem, "cached": False,
+                self.calls.append({"phase": phase, "checkpoint": path.stem, "cached": False, "reasoningEffort": self.reasoning_effort,
                                    "usage": normalized_usage, "durationSeconds": entry["durationSeconds"]})
             if not choices:
                 raise UserError("模型没有返回结果。原稿和已完成分段已保存。")
+            message = choice.get("message") or {}
+            final_text = message.get("content") if isinstance(message, dict) else None
+            empty_final = final_text is None or (isinstance(final_text, str) and not final_text.strip())
             if choice.get("finish_reason") == "length":
+                if empty_final:
+                    write_json(limit_path, {"kind": "no_final_output"})
+                    raise UserError("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
                 if self.config.get("summaryVersion"):
                     write_json(limit_path, {"kind": "output_limit"})
                 raise OutputLimit()
             if choice.get("finish_reason") != "stop":
                 raise UserError("模型未正常结束，未把截断或被拒绝的内容保存成笔记。可继续重试。")
+            if isinstance(message, dict) and empty_final and message.get("reasoning_content"):
+                raise UserError("模型只返回推理过程，没有整理正文。请降低思考强度或调整模型输出预算后重试；原稿与已完成阶段已保留。")
             try:
                 content = choice["message"].get("content") or ""
                 content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
@@ -200,6 +228,8 @@ class ChatClient:
                     code = detail.get("code") if isinstance(detail, dict) else None
                 except (ValueError, AttributeError):
                     code = None
+                finally:
+                    error.close()
                 self.ledger.finish(event, "http_error", error_body.get("usage") if isinstance(error_body, dict) else None, http_status=error.code)
                 if code == "context_length_exceeded":
                     raise OutputLimit() from None

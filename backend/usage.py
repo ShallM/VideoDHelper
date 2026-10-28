@@ -84,6 +84,14 @@ class UsageLedger:
             if isinstance(self.config.get(field), str):
                 event[field] = self.config[field]
         event["modelID"] = self.config["model"]
+        source = self.config.get("sourceKind")
+        if source is not None:
+            event["sourceKind"] = source if source in ("bilibili", "recording") else "unknown"
+        elif event.get("taskID"):
+            event["sourceKind"] = "bilibili"
+        effort = self.config.get("reasoningEffort", "low")
+        if isinstance(effort, str) and effort in ("default", "low", "medium", "high", "max"):
+            event["reasoningEffort"] = effort
         pricing = safe_pricing(self.config.get("pricing"))
         if pricing is not None:
             event["pricing"] = pricing

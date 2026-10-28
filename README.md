@@ -8,11 +8,11 @@
 
 [![macOS](https://img.shields.io/badge/macOS-14%2B-171A21?logo=apple&logoColor=white)](docs/building.md)
 [![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-MLX_%2B_Metal-13B8A6)](docs/user-guide.md#本地转录与模型)
-[![Release](https://img.shields.io/badge/release-0.6.0-4479D6)](https://github.com/ShallM/VideoDHelper/releases/latest)
+[![Release](https://img.shields.io/badge/release-0.6.0-4479D6)](https://github.com/ShallM/VideoDHelper/releases/tag/v0.6.0)
 [![Build](https://github.com/ShallM/VideoDHelper/actions/workflows/ci.yml/badge.svg)](https://github.com/ShallM/VideoDHelper/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-PolyForm_Noncommercial-8867C8)](LICENSE)
 
-[下载 DMG](https://github.com/ShallM/VideoDHelper/releases/latest) · [安装指南](docs/installing.md) · [开始使用](#开始使用) · [功能一览](#功能一览) · [使用指南](docs/user-guide.md) · [开发日志](CHANGELOG.md) · [实测报告](docs/validation-0.5.md)
+[下载 0.6.0 DMG](https://github.com/ShallM/VideoDHelper/releases/tag/v0.6.0) · [安装指南](docs/installing.md) · [开始使用](#开始使用) · [功能一览](#功能一览) · [录音开发预览](docs/recordings.md) · [使用指南](docs/user-guide.md) · [开发日志](CHANGELOG.md)
 
 </div>
 
@@ -22,6 +22,23 @@
 
 > [!IMPORTANT]
 > **0.6.0 提供独立 DMG：仅支持 Apple Silicon（M 系列），macOS 14+。** 内置 Python、MLX、yt-dlp 和 FFmpeg，拖入“应用程序”即可安装。**本版未公证**，首次打开可能需要按 [安装指南](docs/installing.md#本版未公证首次打开) 在系统设置中确认。模型权重首次使用时准备，API 由你自行配置。
+
+> [!NOTE]
+> **0.7.0 正在开发预览，尚未合并到 `main`，也未发布新 Release。** 本轮增加独立录音工作区、二人对话整理和逐模型思考强度，承接任务归档与删除改进。下方下载入口仍是 **0.6.0**；不要把开发预览功能与已发布 DMG 混淆。
+
+## 0.7.0 开发预览
+
+| 从哪里开始 | 本轮功能 |
+|---|---|
+| **左上角功能菜单** | 在“B站视频”和“录音整理”之间切换整页；各自拥有项目、最近、未归属和归档，任务不会混在一起。 |
+| **导入手机录音** | 重点支持 M4A、MP3、WAV，普通话、两人对话，最长 50 分钟；保存本机副本，保留外部原文件。 |
+| **先取得原话** | 本地 MLX Whisper 转录；可选 SpeakerKit 区分说话人 A / B，无法确定的片段保留待确认标记。这个阶段不调用大语言模型。 |
+| **校对后再整理** | 改说话人姓名、校订单句、点时间回听；明确点击“整理与总结”后，才将文字交给模型，得到整理对话和总结。 |
+| **模型与用量** | 每个模型保存思考强度；本轮正在接入按 B 站视频、录音整理、连接测试筛选用量，保留手填价格和费用换算。 |
+
+SpeakerKit 采用 **CPU 与 Apple Neural Engine 混合计算**，并非整条分人流程都运行在 GPU。额外模型在较新系统上约 11 MB，macOS 14 使用另一组约 15 MB 模型；与 Whisper 权重分别缓存。短应答、相似声音和重叠讲话仍需人工核对，合成测试不代表真人录音准确率。
+
+使用步骤、恢复规则与已知边界见 **[录音整理指南](docs/recordings.md)**。当前工作仍需完成本轮整体验收，不以这里的功能说明表示新版已安装或已发布。
 
 ## 功能一览
 
@@ -36,12 +53,11 @@
 | **模型与用量** | 多服务商、多模型、连接测试、手填价格表；统计输入、输出、推理、缓存命中及分阶段费用估算，支持 CSV。 |
 | **本机存储** | 可选择完成后保留或清理媒体；只有文字成功保存后才清理。B 站会话留在本机，模型接口接收文字资料。 |
 
-> [!NOTE]
-> **开发分支已加入任务归档、恢复与删除，等待发布。** 删除使用 macOS 废纸篓，并保留历史用量。使用方法与截图见[任务管理验收](docs/validation-task-lifecycle.md)；当前 0.6.0 DMG 尚不包含这些功能。
+开发预览的归档、恢复与删除使用说明见[任务管理验收](docs/validation-task-lifecycle.md)。删除使用 macOS 废纸篓，并保留历史用量；当前 0.6.0 DMG 尚不包含这些管理入口。
 
 ## 开始使用
 
-从 **[GitHub Release 下载 DMG](https://github.com/ShallM/VideoDHelper/releases/latest)** → 打开 → 将 VideoDHelper 拖入 Applications → 复制完成后推出磁盘映像 → 从“应用程序”启动。
+从 **[GitHub Release 下载 0.6.0 DMG](https://github.com/ShallM/VideoDHelper/releases/tag/v0.6.0)** → 打开 → 将 VideoDHelper 拖入 Applications → 复制完成后推出磁盘映像 → 从“应用程序”启动。
 
 ![DMG 安装界面：将 VideoDHelper 拖到 Applications](docs/images/dmg-installer.png)
 
@@ -102,8 +118,9 @@ flowchart LR
 |---|---|
 | [安装与升级](docs/installing.md) | DMG、首次打开、数据位置与校验和 |
 | [使用指南](docs/user-guide.md) | 登录、下载选择、三种文字、项目、恢复与导出 |
+| [录音整理（0.7.0 开发预览）](docs/recordings.md) | 两人录音、本地分人、人工校订、对话总结与恢复 |
 | [构建与开发](docs/building.md) | 环境、构建、测试、CI 产物、常见问题 |
-| [版本日志](CHANGELOG.md) | 0.1 → 0.6 的功能和修复 |
+| [版本日志](CHANGELOG.md) | 0.1 → 0.6 的功能和修复，以及 0.7.0 未发布改动 |
 | [开发记录](docs/development-log.md) | 关键取舍、验证结论与下一阶段 |
 | [任务管理验收（待发布）](docs/validation-task-lifecycle.md) | 归档、删除、项目联动、废纸篓恢复与计量保留 |
 | [总结设计](docs/summarization-v2.md) · [技术调研](docs/summarization-research-2026-10-25.md) | 全文阅读、来源核验、有界回读与设计依据 |
@@ -139,6 +156,7 @@ python3 scripts/check-publication.py
 - 已测试普通投稿视频与单个分 P 链接；批量队列、合集、番剧和付费课程尚未逐项验收。
 - 主要面向中文学习视频；最长完整实测 87:05。画面中的代码、公式、图表和关键帧尚未接入。
 - 来源覆盖不等于语义正确；专名、数字、医疗或其他专业论断应回看来源。当前不做外部事实核查。
+- 0.7.0 录音预览面向普通话二人对话；不做自动性别判断、真实身份识别或跨录音声纹库。多人会议、实时录音和手机同步暂不包含在首版。
 - **分发限制：** 本版仅 arm64 / macOS 14+，未公证；本机实测为 M4 / macOS 26.6.2，尚未覆盖 macOS 14 真机与所有 M 系列。后续补充兼容性与 Developer ID 公证。
 
 ## 许可与致谢

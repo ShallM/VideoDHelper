@@ -9,6 +9,7 @@ public enum AppStorage {
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("VideoDHelper", isDirectory: true)
     }
     public static var jobs: URL { root.appendingPathComponent("tasks", isDirectory: true) }
+    public static func jobs(for workspace: WorkspaceKind) -> URL { root.appendingPathComponent(workspace.tasksDirectoryName, isDirectory: true) }
 
     public static func write<T: Encodable>(_ value: T, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -26,12 +27,14 @@ public enum AppStorage {
     }
 
     public static func history() -> [ProcessingJob] {
-        let directories = (try? FileManager.default.contentsOfDirectory(at: jobs, includingPropertiesForKeys: nil)) ?? []
-        return directories.filter { UUID(uuidString: $0.lastPathComponent) != nil }
+        return WorkspaceKind.allCases.flatMap { workspace -> [ProcessingJob] in
+            let directories = (try? FileManager.default.contentsOfDirectory(at: jobs(for: workspace), includingPropertiesForKeys: nil)) ?? []
+            return directories.filter { UUID(uuidString: $0.lastPathComponent) != nil }
             .compactMap { directory -> ProcessingJob? in
-                guard let job = try? read(ProcessingJob.self, from: directory.appendingPathComponent("job.json")), job.id == directory.lastPathComponent else { return nil }
+                guard let job = try? read(ProcessingJob.self, from: directory.appendingPathComponent("job.json")), job.id == directory.lastPathComponent, job.workspace == workspace else { return nil }
                 return job
             }
+        }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
@@ -103,10 +106,13 @@ public struct ProcessingJob: Codable, Identifiable, Sendable {
     public var mediaFiles: [String]
     public var segmentCount: Int?
     public var summaryStrategy: String?
-    public var directory: URL { AppStorage.jobs.appendingPathComponent(id, isDirectory: true) }
-    public init(title: String, url: String, source: String, summaryStrategy: String? = nil) {
+    public var sourceKind: WorkspaceKind?
+    public var workspace: WorkspaceKind { sourceKind ?? .bilibili }
+    public var directory: URL { AppStorage.jobs(for: workspace).appendingPathComponent(id, isDirectory: true) }
+    public init(title: String, url: String, source: String, summaryStrategy: String? = nil, workspace: WorkspaceKind = .bilibili) {
         id = UUID().uuidString; self.title = title; self.url = url; self.source = source
         self.summaryStrategy = summaryStrategy
+        self.sourceKind = workspace
         createdAt = Date().timeIntervalSince1970; updatedAt = createdAt
         state = "pending"; stage = "prepare"; message = "等待处理"; mediaFiles = []
     }
@@ -114,6 +120,7 @@ public struct ProcessingJob: Codable, Identifiable, Sendable {
     public var stateLabel: String {
         switch state {
         case "completed": return "已完成"
+        case "transcribed": return "原稿已就绪"
         case "failed": return "待重试"
         case "cancelled": return "已取消"
         case "running": return "处理中 / 可恢复"
@@ -136,6 +143,10 @@ public struct ProcessingRequest: Codable, Sendable {
     public var container: String
     public var whisperModel: String
     public var summaryStrategy: String?
+    public var sourceKind: WorkspaceKind?
+    public var localAudioFile: String?
+    public var recordingAction: String?
+    public var diarizationMode: String?
     public init(title: String, url: String, source: String, segments: [TranscriptSegment], useWhisper: Bool,
                 mediaMode: String, keepMedia: Bool, videoFormatID: String, audioFormatID: String, videoIncludesAudio: Bool,
                 container: String, whisperModel: String, summaryStrategy: String = "structured") {
@@ -149,6 +160,7 @@ public struct ProcessingRequest: Codable, Sendable {
 public struct CitedText: Codable, Sendable {
     public let source_ids: [Int]
     public let text: String
+    public var speaker: String?
 }
 public struct StudyChapter: Codable, Sendable {
     public let source_ids: [Int]
@@ -168,6 +180,7 @@ public struct StudyNotes: Codable, Sendable {
     public let reviewedParagraphs: Int?
     public let paragraphCount: Int?
     public let rereadCount: Int?
+    public let recordingRevision: String?
 }
 public struct WorkerEvent: Decodable, Sendable {
     public let stage: String

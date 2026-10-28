@@ -1,6 +1,6 @@
 {
-  "version": "0.6.0",
-  "build": "7",
+  "version": "0.7.0",
+  "build": "9",
   "minimumMacOS": "14.0",
   "python": {
     "version": "3.12.15",
