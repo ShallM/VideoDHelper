@@ -293,6 +293,29 @@ class MeetingTests(unittest.TestCase):
         p["issues"] = [{"target_id": "claim-0", "field": "text", "kind": "audio", "question": "回听", "u": [0], "query": "", "status": "needs_audio"}]
         e.apply_repair(p, "review"); e.reread(); self.assertEqual(e.reread_count, 0)
 
+    def test_registered_doubts_replace_the_draft_row_without_merging_distinct_fields(self):
+        e = self.prepared()
+        original = {"id": "uncertainty-0", "text": "总数和所指范围需要确认。", "u": [0], "status": "unresolved"}
+        untouched = {"id": "uncertainty-1", "text": "另一个独立问题。", "u": [0], "status": "needs_audio"}
+        e.document["uncertainties"] = [copy.deepcopy(original), copy.deepcopy(untouched)]
+        proposal = empty_review()
+        proposal["issues"] = [{"target_id": "uncertainty-0", "field": field, "kind": kind,
+                               "question": "这里的说法需要回听。", "u": [0], "query": "", "status": "needs_audio"}
+                              for field, kind in (("number", "number"), ("text", "audio"))]
+        e.apply_repair(proposal, "review")
+        notes, _ = e.outputs()
+        questions = notes["uncertainties"]
+        self.assertEqual(len(questions), 3)  # Two distinct fields, one unrelated doubt.
+        registered = [q for q in questions if q.get("originalQuestion")]
+        self.assertEqual(len(registered), 2)
+        self.assertEqual(len({q["id"] for q in registered}), 2)
+        self.assertTrue(all(q["originalQuestion"] == original["text"] for q in registered))
+        self.assertEqual(e.document["uncertainties"], [original, untouched])
+        for issue in e.issues.values():
+            issue["status"] = "resolved"
+        notes, _ = e.outputs()
+        self.assertEqual([q["id"] for q in notes["uncertainties"]], ["uncertainty-1"])
+
     def test_reread_cannot_edit_unrelated_claim_in_the_same_source_range(self):
         e = self.prepared()
         unrelated = {**copy.deepcopy(e.document["chapters"][0]["claims"][0]), "id": "claim-other"}

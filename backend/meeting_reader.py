@@ -15,7 +15,7 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 from summary_v2 import estimated_tokens
 
-VERSION = "meeting-reader-v3.8"
+VERSION = "meeting-reader-v3.9"
 PROMPT_VERSION = "meeting-prompts-v1.4"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
@@ -410,12 +410,21 @@ class MeetingReader(Reader):
                              "source_ids": sorted({s for i in claims for s in i["source_ids"]})})
         if not chapters:
             raise UserError("核验后没有可支持的主题，未发布空纪要")
-        questions = [self.cited(i, statement=False) for i in self.document["uncertainties"]]
+        original_questions = {i["id"]: i for i in self.document["uncertainties"]}
+        registered_targets = {i["target_id"] for i in self.issues.values()}
+        questions = [self.cited(i, statement=False) for i in self.document["uncertainties"]
+                     if i["id"] not in registered_targets]
         for issue in self.issues.values():
             if issue["status"] != "resolved":
-                question = self.cited({**issue, "text": issue["question"]}, statement=False)
-                if not any(i["text"] == question["text"] and i["source_ids"] == question["source_ids"] for i in questions):
-                    questions.append(question)
+                original = original_questions.get(issue["target_id"])
+                units = sorted(set(issue["u"]) | set(original["u"] if original else []))
+                question = self.cited({**issue, "text": issue["question"], "u": units}, statement=False)
+                if original:
+                    question["originalQuestion"] = original["text"]
+                # Registered target/field identity is authoritative. Rewording
+                # the same doubt must not create a second visible row, while
+                # two distinct fields must not merge just because words match.
+                questions.append(question)
         notes = {"overview": self.document["overview"]["text"], "overviewSourceIDs": self.cited(self.document["overview"], statement=False)["source_ids"],
                  "chapters": chapters, "key_points": [], "action_items": [self.cited(i) for i in self.document["action_items"]], "uncertainties": questions,
                  "model": self.config["model"], "tokensThisRun": self.client.total_tokens, "summaryStrategy": self.strategy,
