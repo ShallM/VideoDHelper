@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1.3"
+VERSION = "meeting-products-v1.4"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -106,7 +106,10 @@ def anchor(proof, units):
         if (type(first) is not int or type(last) is not int or first > last
                 or first not in positions or last not in positions
                 or any(i not in positions for i in range(first, last + 1))):
-            raise ValueError("evidence的first_part/last_part必须是该unit内真实连续片段编号")
+            available = list(positions)
+            bounds = f"{available[0]}..{available[-1]}" if available else "空"
+            raise ValueError(f"evidence.unit={proof['unit']}请求part {first}..{last}，实际范围为{bounds}；"
+                             "编号须连续且属于本unit，跨单元须拆成独立evidence，不能裁掉原意。")
         start, end = positions[first][0], positions[last][1]
         quote = unit["text"][start:end]
         if "quote" in proof and proof["quote"] != quote:
@@ -142,10 +145,11 @@ def validate_items(entries, units):
     for path, item, action in entries:
         try:
             validate_item(item, units, action=action)
-        except AttributionError as error:
-            errors.append(f"{path}: {error.compact}")
+        except (ValueError, KeyError, TypeError) as error:
+            detail = error.compact if isinstance(error, AttributionError) else str(error)
+            errors.append(f"{path}: {detail}")
     if errors:
-        raise ValueError("归属校验未通过，共" + str(len(errors)) + "处。只选引文内同标签片段，未知不猜人。" + "；".join(errors))
+        raise ValueError("声明校验未通过，共" + str(len(errors)) + "处。只选真实来源与同标签归属，未知不猜人。" + "；".join(errors))
 
 
 def validate_item(item, units, *, action=False):

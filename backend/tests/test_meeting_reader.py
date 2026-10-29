@@ -126,7 +126,7 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(set(report["failures"][0]), {"phase", "error", "candidate"})
         self.assertFalse((self.folder / "dialogue-results.json").exists())
 
-    def test_retry_receives_multiple_attribution_locations_without_reassigning_them(self):
+    def test_retry_receives_source_bounds_and_multiple_attribution_locations(self):
         drafts = []
         def invalid_first(client, body, phase, payload):
             if phase != "meeting_draft": return None
@@ -134,6 +134,7 @@ class MeetingTests(unittest.TestCase):
             if len(drafts) == 1:
                 value = document(self.engine.units)
                 value["chapters"][0]["claims"] = [item(self.engine.units[0], speaker="A") for _ in range(8)]
+                value["chapters"][0]["claims"][0]["evidence"][0]["last_part"] = 999
                 return self.envelope(value)
         self.hook = invalid_first
         _, _ = self.run_reader(dialogueStrategy="meeting-baseline")
@@ -141,10 +142,12 @@ class MeetingTests(unittest.TestCase):
         feedback = drafts[1]["messages"][0]["content"]
         self.assertIn("chapters[0].claims[0]", feedback)
         self.assertIn("chapters[0].claims[7]", feedback)  # Beyond the old 240-character cut.
+        self.assertIn("实际范围为0..3", feedback)
         self.assertIn("0:B", feedback)
         report = read_json(self.folder / "meeting-validation.json")
         failed = report["failures"][0]["candidate"]["chapters"][0]["claims"]
         self.assertEqual([i["speaker"] for i in failed], ["A"] * 8)
+        self.assertEqual(failed[0]["evidence"][0]["last_part"], 999)  # Never cropped silently.
         self.assertEqual(report["failureCount"], 1)
 
     def test_identity_isolates_strategy_effort_source_and_limits(self):

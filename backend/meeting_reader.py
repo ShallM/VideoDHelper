@@ -14,7 +14,7 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
     validate_item, validate_items, punctuation_rows, render_item, string, anchor)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 
-VERSION = "meeting-reader-v3.6"
+VERSION = "meeting-reader-v3.7"
 PROMPT_VERSION = "meeting-prompts-v1.3"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
@@ -115,7 +115,7 @@ class MeetingReader(Reader):
         def validate(value):
             if not isinstance(value.get("items"), list) or len(value["items"]) > 600:
                 raise ValueError("items须为有限关键事实列表")
-            validate_items(((f"items[{i}]", item, item.get("kind") == "action") for i, item in enumerate(value["items"])),
+            validate_items(((f"items[{i}]", item, isinstance(item, dict) and item.get("kind") == "action") for i, item in enumerate(value["items"])),
                            {u["id"]: u for u in source_units})
             for item in value["items"]:
                 if not ids.intersection(item["u"]):
