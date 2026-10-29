@@ -114,6 +114,17 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(notes["summaryStrategy"], "meeting-baseline")
         self.assertEqual(notes["reviewedParagraphs"], 0)
 
+    def test_failed_product_is_retained_for_diagnosis_without_reasoning(self):
+        def malformed(client, body, phase, payload):
+            if phase == "meeting_draft": return self.envelope({"overview": {"text": "test", "u": [999]}})
+        self.hook = malformed
+        with self.assertRaises(ValueError): self.run_reader()
+        report = read_json(self.folder / "meeting-validation.json")
+        self.assertEqual(report["failureCount"], 2)
+        self.assertEqual(report["failures"][0]["phase"], "meeting_draft")
+        self.assertEqual(set(report["failures"][0]), {"phase", "error", "candidate"})
+        self.assertFalse((self.folder / "dialogue-results.json").exists())
+
     def test_identity_isolates_strategy_effort_source_and_limits(self):
         original = self.reader().identity
         for opts in ({"dialogueStrategy": "meeting-baseline"}, {"reasoningEffort": "low"}, {"dialogueMaxRereads": 0}, {"sourceRevision": "changed"}):

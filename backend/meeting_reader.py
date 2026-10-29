@@ -37,6 +37,24 @@ class MeetingReader(Reader):
         self.evidence_batches, self.review_batches = 0, 0
         self.source_coverage, self.stage_times = [], {}
         self.publication = False
+        self.validation_failures = []
+        self.validation_failure_count = 0
+
+    def call(self, prompt, payload, validator, phase):
+        def checked(value):
+            try:
+                return validator(value)
+            except (ValueError, KeyError, TypeError) as error:
+                # Keep only the proposed product, never the model's reasoning
+                # or request credentials. A failed repair must be diagnosable.
+                self.validation_failures.append({"phase": phase, "error": str(error)[:240],
+                                                 "candidate": copy.deepcopy(value)})
+                self.validation_failure_count += 1
+                self.validation_failures = self.validation_failures[-12:]
+                write_json(self.folder / "meeting-validation.json", {"identity": self.identity,
+                           "failureCount": self.validation_failure_count, "failures": self.validation_failures})
+                raise
+        return super().call(prompt, payload, checked, phase)
 
     def draft(self, units, depth=0):
         payload = {"title": self.title, "sources": source_text(units)}
@@ -410,6 +428,7 @@ class MeetingReader(Reader):
                        "assessments": len(self.assessments), "evidenceBatches": self.evidence_batches, "reviewBatches": self.review_batches,
                        "rereadCount": self.reread_count, "duplicateIssues": self.duplicate_issues, "retrievalCacheHits": self.retrieval_hits,
                        "noProgressRereads": self.no_progress, "condenseBatches": self.condense_batches,
+                       "validationFailures": self.validation_failure_count,
                        "changedRepairBatches": sum(p["changed"] for p in self.patch_log)})
 
 
