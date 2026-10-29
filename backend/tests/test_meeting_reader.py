@@ -474,6 +474,34 @@ class MeetingTests(unittest.TestCase):
         _, _ = self.run_reader()
         self.assertEqual([p for p, _, _ in self.requests[previous:]], ["meeting_review", "meeting_punctuation"])
 
+    def test_long_review_keeps_distant_source_without_importing_unrelated_claims(self):
+        segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
+                     "text": f"第{i}项资料已经具备。", "speaker": "B"} for i in range(12)]
+        e = self.reader(segments)
+        d = document(e.units)
+        d["overview"]["u"] = [0, 3, 5, 8, 10]
+        d["chapters"][0]["claims"] = [item(u, text=u["text"]) for u in e.units]
+        validate_document(d, e.units); e.identify(d)
+        for u in e.units:
+            c = item(u, text=u["text"]); validate_item(c, e.lookup)
+            c["id"] = f"check-{u['id']}"; e.checks[c["id"]] = c
+        batches = []
+        def bounded(prompt, payload, validator, phase):
+            if len(payload["targets"]) > 4 or len(payload["owned_checks"]) > 2:
+                raise InputContextLimit("synthetic complete-payload limit")
+            batches.append(copy.deepcopy(payload))
+            v = empty_review(payload["owned_checks"], payload["owned_targets"])
+            validator(v); return v
+        with patch.object(e, "call", side_effect=bounded): e.review_range(e.units)
+        overview_batch = next(p for p in batches if "overview" in p["owned_targets"])
+        self.assertIn("[u10]", overview_batch["sources"])
+        self.assertIn("第10项资料已经具备。", overview_batch["sources"])
+        self.assertNotIn("claim-10", [t["id"] for t in overview_batch["targets"]])
+        self.assertCountEqual([t for p in batches for t in p["owned_targets"]], e.meeting_targets())
+        self.assertCountEqual([c for p in batches for c in p["owned_checks"]], e.checks)
+        self.assertEqual(e.reviewed, set(range(12)))
+        self.assertEqual(e.document["overview"]["u"], [0, 3, 5, 8, 10])
+
     def test_stale_publication_preserves_old_results_and_checkpoint_success(self):
         saved = {"old": "preserved"}; write_json(self.folder / "dialogue-results.json", saved)
         def stale(): raise UserError("source changed")

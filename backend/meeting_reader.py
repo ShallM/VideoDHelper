@@ -15,7 +15,7 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 from summary_v2 import estimated_tokens
 
-VERSION = "meeting-reader-v3.9"
+VERSION = "meeting-reader-v3.10"
 PROMPT_VERSION = "meeting-prompts-v1.4"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
@@ -332,7 +332,14 @@ class MeetingReader(Reader):
             related = ids | {i for t in target_ids for i in targets[t]["value"]["u"]} | {i for c in checks.values() for i in c["u"]}
             units = select_context(self.units, sorted(related))
             visible = {u["id"] for u in units}
-            targets = {k: v for k, v in targets.items() if k in target_ids or set(v["value"]["u"]).issubset(visible)}
+            # An overview may cite distant topics. Their source is necessary
+            # context, but importing every claim within that context makes
+            # even one owned unit exceed the request budget. Other claims are
+            # comparison targets only when they touch this batch's actual
+            # responsibility or checks; each still gets its own review later.
+            comparison_units = ids | {i for c in checks.values() for i in c["u"]}
+            targets = {k: v for k, v in targets.items() if k in target_ids or
+                       (comparison_units.intersection(v["value"]["u"]) and set(v["value"]["u"]).issubset(visible))}
             payload.update(sources=source_text(units), targets=list(targets.values()))
         try:
             value = self.call(REVIEW_PROMPT, compact_evidence(payload),
