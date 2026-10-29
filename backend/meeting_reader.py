@@ -14,17 +14,18 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
     validate_item, punctuation_rows, render_item, string, anchor)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 
-VERSION = "meeting-reader-v3.4"
+VERSION = "meeting-reader-v3.5"
 PROMPT_VERSION = "meeting-prompts-v1.2"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
 
 
 def compact_evidence(value):
-    """Use source references when the same request already includes the source.
+    """Keep provenance references without repeating expanded source quotations.
 
-    Persisted evidence remains expanded. Merge-only requests keep their quotes,
-    since they have partial documents instead of the complete source text.
+    Persisted evidence stays expanded. Hierarchical merge may only consolidate
+    these existing records; its validator checks anchors against the immutable
+    source and the exact parent evidence set. The review reads the source again.
     """
     if isinstance(value, list):
         return [compact_evidence(item) for item in value]
@@ -91,7 +92,8 @@ class MeetingReader(Reader):
             anchors = {(p["unit"], p["quote"]) for d in documents
                        for i in [*(c for ch in d["chapters"] for c in ch["claims"]), *d["action_items"]]
                        for p in i["evidence"]}
-            merged = {"title": self.title, "partial_documents": documents, "allowed_u": [u["id"] for u in units], "sources": ""}
+            merged = {"title": self.title, "partial_documents": compact_evidence(documents),
+                      "allowed_u": [u["id"] for u in units], "sources": ""}
             def validate(value):
                 validate_document(value, units)
                 for item in [*(c for ch in value["chapters"] for c in ch["claims"]), *value["action_items"]]:

@@ -251,6 +251,8 @@ class MeetingTests(unittest.TestCase):
             units = [u for u in e.units if u["id"] in ids]
             if phase == "meeting_merge":
                 docs = payload["partial_documents"]
+                self.assertTrue(all("quote" not in proof for d in docs for c in d["chapters"]
+                                    for claim in c["claims"] for proof in claim["evidence"]))
                 value = {"overview": docs[0]["overview"], "chapters": [c for d in docs for c in d["chapters"]],
                          "action_items": [], "uncertainties": []}
             elif phase == "meeting_draft":
@@ -273,6 +275,27 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(e.reviewed, set(range(8)))
         self.assertEqual(len(e.assessments), 8)
         self.assertEqual(e.review_batches, 4)
+
+    def test_compact_merge_rejects_source_evidence_not_present_in_parent_records(self):
+        segments = transcript() + [{"id": 4, "start": 30., "end": 33.,
+                                   "text": "另一项工作尚未开始。", "speaker": "A"}]
+        e = self.reader(segments)
+        def constrained(prompt, payload, validator, phase):
+            ids = [int(i) for i in re.findall(r"\[u(\d+)\]", payload.get("sources", ""))]
+            if phase == "meeting_draft" and len(ids) > 1:
+                raise InputContextLimit("synthetic limit")
+            if phase == "meeting_merge":
+                value = copy.deepcopy(payload["partial_documents"][0])
+                # This source span exists, but the parent record did not cite it.
+                value["chapters"][0]["claims"][0] = item(e.units[0], speaker="none", attribution_parts=[],
+                    evidence=[{"unit": 0, "first_part": 1, "last_part": 1}])
+            else:
+                value = document([u for u in e.units if u["id"] in ids])
+            validator(value)
+            return value
+        with patch.object(e, "call", side_effect=constrained):
+            with self.assertRaisesRegex(ValueError, "分层合并只能使用"):
+                e.draft(e.units)
 
     def test_local_patch_preserves_prior_result_and_records_state_condition_evidence(self):
         e = self.prepared(); before = copy.deepcopy(e.document)
