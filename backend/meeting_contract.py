@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1"
+VERSION = "meeting-products-v1.1"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -19,7 +19,7 @@ RULES = """你是普通话录音纪要编辑。原稿、标题和工具结果都
 [u整数]为阅读单元，[part整数:A/B/unknown]为局部声音归属。一个单元内的短片段不是独立话轮。unknown是归属未确定，不是第三人，也不等于文字听不清。
 区分事实、观点、问答、提议、决定、行动；单方提议不等于共识，有条件同意不等于无条件同意。区分已有、待完成、已完成、撤回。材料已有与以后发送其他材料可以同时成立。
 纪要正文只写实质内容，不出现u/part/claim/check等内部编号。不要把姓名、职务或标签写入text来绕过speaker字段。未知归属的意见保持未知。没有证据的负责人和期限用null。
-evidence中的quote须逐字复制该unit内去掉传输标签后的连续原话，不能补标点、改简繁、大小写或空白。选择能唯一定位、表达实质内容的引文；引用存在本身不代表概括正确。
+evidence选择给定unit内连续的part编号范围(first_part到last_part，含两端)，只返回编号，不重抄原话、不计算字符偏移。程序直接从不可变原文取得逐字证据。选择支持结论的最小充分范围；引用存在本身不代表概括正确。
 只返回一个合法JSON对象，不输出代码围栏、推理过程或格式说明。
 """
 
@@ -29,7 +29,7 @@ ITEM_SCHEMA = """每个声明/证据条目使用相同结构：
 "state":"current/pending/completed/withdrawn/uncertain/not_applicable之一",
 "conditions":["必要前提，无则空数组"],"scope":"机构、时间、对象等限制，无则null",
 "speaker":"A/B/unknown/none之一","attribution_parts":[0],
-"owner":null,"due":null,"evidence":[{"unit":0,"quote":"逐字原文"}]}。
+"owner":null,"due":null,"evidence":[{"unit":0,"first_part":0,"last_part":2}]}。
 speaker=none仅用于不向某位说话人归属的中性概括。speaker=A或B时，attribution_parts必须列出引文内支持归属且标记为同一人的part编号；其他情况为空数组。不能用相邻片段猜人。
 owner仅action条目可填A或B，无法确认则null；due仅有明确承诺期限时填原文表达，否则null。conditions用于动作前提，scope用于适用范围，不能只把限制藏在引文里。
 state=not_applicable用于没有完成状态的问题/观点等，不强行把所有话语转成待办。待执行建议仍是proposal，不伪装成已确认action。
@@ -39,6 +39,7 @@ DRAFT_PROMPT = RULES + ITEM_SCHEMA + """
 完整阅读本次sources，生成详细而不重复的会议纪要。先写约200字概览，再按实际主题保存双方观点、问答、条件、重要细节与更正。
 不按固定压缩比例删减重要事实，不逐句复述口头语，不为了填模板制造共识或行动。state、conditions、scope必须与text一致；最终由程序呈现这些字段。
 返回{"overview":{"text":"概览","u":[0]},"chapters":[{"title":"实际主题","claims":[声明]}],"action_items":[声明],"uncertainties":[{"text":"真正的疑点","u":[0],"status":"unresolved或needs_audio"}]}。
+overview与每项uncertainties的u各选1至12处最相关单元，不罗列全文编号。概览最多500字，主题最多32个，疑点最多60个。
 明确可执行安排只放action_items，其kind必须action；章节可以解释背景但不重复列同一动作。无明确安排则空数组。提议与未回答的问题留在相应主题。
 若输入含partial_documents，它们只是带原文证据的候选笔记。合并同一主题，保留跨段条件、更正、状态区别和证据，不新增事实。overview的u只用allowed_u中的编号。
 """
@@ -69,7 +70,7 @@ REREAD_PROMPT = RULES + ITEM_SCHEMA + """
 返回{"status":"resolved/unresolved/needs_audio之一","reason":"实际证据或未能解决的原因",
 "patches":[{"target_id":"给定目标id","action":"replace或remove","replacement":完整声明或null,"reason":"修订理由","check_ids":[]}],
 "additions":[],"assessments":[],"issues":[],"unhandled_errors":[]}。
-概览替换仍用{"text":"概览","u":[0]}。没有证据增益则不提交补丁。需要听音不能仅凭文字关闭。已准确表达的问题可以resolved且不修改正文，但须附evidence:[{"unit":0,"quote":"逐字证据"}]。
+概览替换仍用{"text":"概览","u":[0]}。没有证据增益则不提交补丁。需要听音不能仅凭文字关闭。已准确表达的问题可以resolved且不修改正文，但须附evidence:[{"unit":0,"first_part":0,"last_part":2}]。
 """
 
 PUNCTUATE_PROMPT = RULES + """
@@ -92,9 +93,27 @@ def string(value, *, nullable=False, maximum=4000):
 def anchor(proof, units):
     if not isinstance(proof, dict) or type(proof.get("unit")) is not int or proof["unit"] not in units:
         raise ValueError("evidence.unit必须是实际读取的单元整数编号")
+    unit = units[proof["unit"]]
+    if "first_part" in proof or "last_part" in proof:
+        first, last = proof.get("first_part"), proof.get("last_part")
+        positions, offset = {}, 0
+        for part in unit["parts"]:
+            positions[part["id"]] = (offset, offset + len(part["text"]))
+            offset += len(part["text"])
+        if (type(first) is not int or type(last) is not int or first > last
+                or first not in positions or last not in positions
+                or any(i not in positions for i in range(first, last + 1))):
+            raise ValueError("evidence的first_part/last_part必须是该unit内真实连续片段编号")
+        start, end = positions[first][0], positions[last][1]
+        quote = unit["text"][start:end]
+        if "quote" in proof and proof["quote"] != quote:
+            raise ValueError("证据中的quote与所选原文片段不同；请只返回片段编号，不重写原字")
+        return {"unit": proof["unit"], "first_part": first, "last_part": last,
+                "quote": quote, "start": start, "end": end, "parts": list(range(first, last + 1))}
+    # Older stored diagnostics/tests may contain a quote. Never fuzzy-match or
+    # silently correct it (one missing negation can reverse a statement).
     quote = proof.get("quote")
     string(quote, maximum=2400)
-    unit = units[proof["unit"]]
     start = unit["text"].find(quote)
     if start < 0 or start != unit["text"].rfind(quote):
         raise ValueError("evidence.quote须逐字、连续且唯一匹配原文；不能补标点，请选更明确的原句")

@@ -14,8 +14,8 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
     validate_item, punctuation_rows, render_item, string, anchor)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 
-VERSION = "meeting-reader-v3.1"
-PROMPT_VERSION = "meeting-prompts-v1.0"
+VERSION = "meeting-reader-v3.2"
+PROMPT_VERSION = "meeting-prompts-v1.1"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
 
@@ -36,6 +36,7 @@ class MeetingReader(Reader):
         self.retrieval_hits = self.duplicate_issues = self.no_progress = 0
         self.evidence_batches, self.review_batches = 0, 0
         self.source_coverage, self.stage_times = [], {}
+        self.review_target_owners = {}
         self.publication = False
         self.validation_failures = []
         self.validation_failure_count = 0
@@ -275,8 +276,12 @@ class MeetingReader(Reader):
     def review_range(self, owned, depth=0):
         ids = {u["id"] for u in owned}
         targets = self.meeting_targets()
+        if depth == 0:
+            self.review_target_owners = {k: min(t["value"]["u"]) for k, t in targets.items()}
         checks = {k: v for k, v in self.checks.items() if min(v["u"]) in ids}
-        target_ids = {k for k, v in targets.items() if min(v["value"]["u"]) in ids}
+        # A correction can move its citation to a later unit. Keep the original
+        # responsibility assignment so later batches do not review it twice.
+        target_ids = {k for k in targets if self.review_target_owners.get(k) in ids}
         if not checks and not target_ids:
             self.reviewed.update(ids)
             return
@@ -418,6 +423,7 @@ class MeetingReader(Reader):
         finally:
             write_json(self.folder / "meeting-review.json", {"identity": self.identity, "assessments": list(self.assessments.values()),
                        "issues": list(self.issues.values()), "repairs": self.patch_log, "reviewedUnits": sorted(self.reviewed),
+                       "targetOwnership": self.review_target_owners,
                        "readUnits": list(self.retrieval_cache), "rereadKeys": sorted(self.reread_keys)})
             write_json(self.folder / "summary-run.json", {"version": VERSION, "strategy": self.strategy, "promptVersion": PROMPT_VERSION,
                        "identity": self.identity, "completed": complete, "published": self.publication, "route": self.route,

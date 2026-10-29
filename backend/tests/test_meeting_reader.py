@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from common import UserError, read_json, write_json
 from dialogue_context import build_context
-from meeting_contract import validate_item, validate_document, punctuation_rows, render_item
+from meeting_contract import validate_item, validate_document, punctuation_rows, render_item, anchor
 from meeting_reader import MeetingReader
 from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted
 from worker import validate_request
@@ -26,7 +26,8 @@ def item(unit, quote=None, **changes):
     p = unit["parts"][0]
     result = {"text": "资料已经具备。", "kind": "fact", "state": "current", "conditions": [], "scope": None,
               "speaker": p["speaker"], "attribution_parts": [p["id"]] if p["speaker"] in ("A", "B") else [],
-              "owner": None, "due": None, "evidence": [{"unit": unit["id"], "quote": quote or p["text"]}]}
+              "owner": None, "due": None, "evidence": [{"unit": unit["id"], "quote": quote} if quote is not None else
+                                                       {"unit": unit["id"], "first_part": p["id"], "last_part": p["id"]}]}
     result.update(changes)
     return result
 
@@ -139,6 +140,18 @@ class MeetingTests(unittest.TestCase):
         with self.assertRaises(ValueError): validate_item(bad, e.lookup)
         bad = item(e.units[0], "不", speaker="A", attribution_parts=[2])
         with self.assertRaises(ValueError): validate_item(bad, e.lookup)
+
+    def test_evidence_parts_take_exact_source_without_model_retyping_or_guessing(self):
+        e = self.reader()
+        proof = anchor({"unit": 0, "first_part": 0, "last_part": 2}, e.lookup)
+        self.assertEqual(proof["quote"], "中文资料已经有了。实验条件也齐备。先复现程序，测试通过才发送结果。不")
+        self.assertEqual(proof["parts"], [0, 1, 2])
+        self.assertEqual(anchor(proof, e.lookup), proof)
+        with self.assertRaises(ValueError): anchor({**proof, "quote": proof["quote"][:-1]}, e.lookup)
+        with self.assertRaises(ValueError): anchor({"unit": 0, "first_part": 0, "last_part": 999}, e.lookup)
+        repeated = build_context([{**transcript()[0], "text": "是", "speaker": "A"}, {**transcript()[1], "text": "是", "speaker": "B"}])
+        located = anchor({"unit": 0, "first_part": 1, "last_part": 1}, {0: repeated[0]})
+        self.assertEqual((located["start"], located["end"], located["parts"]), (1, 2, [1]))
 
     def test_rendering_keeps_condition_scope_state_and_action_deadline_separate(self):
         e = self.reader()
@@ -259,6 +272,30 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(e.document["chapters"][0]["claims"][0]["id"], "claim-0")
         self.assertEqual(e.document["chapters"][0]["claims"][0]["conditions"], ["测试通过才发送结果"])
         self.assertEqual(e.patch_log[0]["after"], e.document)
+
+    def test_cross_range_correction_does_not_reassign_claim_to_another_review_batch(self):
+        segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
+                     "text": f"第{i}项资料已具备。", "speaker": "B"} for i in range(4)]
+        e = self.reader(segments)
+        d = document(e.units)
+        d["chapters"][0]["claims"][0]["evidence"].append({"unit": 3, "quote": e.units[3]["text"]})
+        validate_document(d, e.units); e.identify(d)
+        for u in e.units:
+            c = item(u, text=u["text"]); validate_item(c, e.lookup); c["id"] = f"check-{u['id']}"; e.checks[c["id"]] = c
+        assigned = []
+        def split(prompt, payload, validator, phase):
+            if len(payload["owned_checks"]) > 2: raise InputContextLimit("synthetic review limit")
+            assigned.extend(payload["owned_targets"])
+            v = empty_review(payload["owned_checks"], [t["id"] for t in payload["targets"]])
+            if "claim-0" in payload["owned_targets"]:
+                v["patches"] = [{"target_id": "claim-0", "action": "replace", "replacement": item(e.units[3], text=e.units[3]["text"]),
+                                 "reason": "后文更正以前文为准的陈述", "check_ids": []}]
+            validator(v); return v
+        with patch.object(e, "call", side_effect=split): e.review_range(e.units)
+        self.assertEqual(assigned.count("claim-0"), 1)
+        self.assertEqual(e.document["chapters"][0]["claims"][0]["u"], [3])
+        self.assertEqual(e.review_target_owners["claim-0"], 0)
+        self.assertEqual(e.reviewed, set(range(4)))
 
     def test_cancel_after_independent_evidence_resumes_successful_stages(self):
         def stop(client, body, phase, payload):
