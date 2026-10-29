@@ -11,7 +11,7 @@ from dialogue_context import build_context
 from dialogue_reader import Reader
 from meeting_contract import validate_item, validate_document, punctuation_rows, render_item, anchor, REREAD_PROMPT
 from meeting_reader import MeetingReader, compact_evidence, format_dialogue
-from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted
+from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted, ResponseOutputLimit
 from worker import validate_request
 
 
@@ -708,6 +708,69 @@ class MeetingTests(unittest.TestCase):
         with self.assertRaises(ReasoningOutputExhausted): self.run_reader()
         self.assertEqual([p for p, _, _ in self.requests], ["meeting_draft", "meeting_draft"])
         self.assertFalse((self.folder / "dialogue-results.json").exists())
+
+    def route_reader(self, **options):
+        config = {**self.config, "baseURL": "https://api.icompify.com/v1", "model": "deepseek-v4.1-flash"}
+        config.pop("dialogueMaxOutputTokens")
+        self.engine = MeetingReader(transcript(), "预算测试", {**config, **options}, self.folder, lambda *a: None)
+        return self.engine
+
+    def test_current_route_uses_128k_then_256k_without_changing_effort_or_frozen_reader(self):
+        for effort in ("default", "low", "high", "max"):
+            e = self.route_reader(reasoningEffort=effort)
+            self.assertEqual((e.initial_output, e.max_output), (131072, 262144))
+            self.assertEqual(e.client.reasoning_effort, effort)
+        frozen = Reader(transcript(), "预算测试", {"baseURL": "https://api.icompify.com/v1", "model": "deepseek-v4.1-flash",
+                        "apiKey": "test-only", "reasoningEffort": "high"}, self.folder, lambda *a: None)
+        self.assertEqual((frozen.initial_output, frozen.max_output), (32768, 131072))
+        other = self.reader(baseURL="https://api.icompify.com/v1", model="other-model", dialogueMaxOutputTokens=32768)
+        self.assertEqual((other.initial_output, other.max_output), (32768, 32768))
+        self.assertNotEqual(e.identity, self.route_reader(dialogueMaxOutputTokens=131072).identity)
+        for config in ({"dialogueMaxOutputTokens": 262145}, {"dialogueOutputTokens": 262144, "dialogueMaxOutputTokens": 131072}):
+            with self.assertRaises(UserError): self.route_reader(**config)
+
+    def test_new_output_budgets_are_sent_and_successful_replay_has_no_new_requests(self):
+        self.hook = lambda client, body, phase, payload: (self.envelope({"ok": True}) if body["max_tokens"] == 262144 else
+            {"choices": [{"finish_reason": "length", "message": {"reasoning_content": "not retained"}}],
+             "usage": {"completion_tokens": 131072}})
+        for iteration in range(2):
+            e = self.route_reader()
+            with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+                value = e.call("预算测试", {}, lambda v: self.assertTrue(v["ok"]), "meeting_draft")
+            self.assertTrue(value["ok"])
+        self.assertEqual([body["max_tokens"] for _, _, body in self.requests], [131072, 262144])
+        self.assertEqual(e.client.cache_hits, 1)
+        self.assertEqual(e.client.limit_hits, 1)
+
+    def test_256k_exhaustion_or_capacity_rejection_stops_without_third_attempt(self):
+        for final_error in (ReasoningOutputExhausted, ResponseOutputLimit, InputContextLimit):
+            e = self.route_reader(); calls = []
+            def complete(prompt, payload, validator, output_tokens, phase):
+                calls.append(output_tokens)
+                if len(calls) == 1: raise ReasoningOutputExhausted()
+                raise final_error()
+            expected = UserError if final_error == InputContextLimit else final_error
+            with patch.object(e.client, "complete", complete), self.assertRaises(expected): e.draft(e.units)
+            self.assertEqual(calls, [131072, 262144])
+            self.assertEqual(e.route, "whole")
+        e = self.route_reader()
+        with patch.object(e.client, "complete", side_effect=UserError("接口不接受请求参数（HTTP 400）。")) as request:
+            with self.assertRaisesRegex(UserError, "262,144"):
+                e.draft(e.units)
+        self.assertEqual(request.call_count, 1)
+
+    def test_confirmed_context_limit_still_bounds_expansion_and_changes_identity(self):
+        e = self.route_reader(summaryContextWindow=200000)
+        seen = []
+        def complete(prompt, payload, validator, output_tokens, phase):
+            seen.append(output_tokens)
+            if len(seen) == 1: raise ReasoningOutputExhausted()
+            return {"ok": True}
+        with patch.object(e.client, "complete", complete): e.call("test", {}, lambda v: None, "meeting_draft")
+        self.assertEqual(seen[0], 131072)
+        self.assertGreater(seen[1], seen[0])
+        self.assertLess(seen[1], 200000)
+        self.assertNotEqual(e.identity, self.route_reader().identity)
 
     def test_worker_accepts_new_strategies_and_rejects_unknown(self):
         for strategy in ("meeting-v3", "meeting-baseline", "context-v2", "legacy"):

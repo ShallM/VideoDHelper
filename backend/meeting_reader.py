@@ -5,6 +5,7 @@ publication, provenance, deduplication and budgets. No external tools or agents.
 """
 import copy
 import time
+from urllib.parse import urlsplit
 
 from common import UserError, digest, read_json, write_json
 from dialogue_context import source_text, select_context
@@ -15,7 +16,7 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit, OutputLimit
 from summary_v2 import estimated_tokens
 
-VERSION = "meeting-reader-v3.12"
+VERSION = "meeting-reader-v3.13"
 PROMPT_VERSION = "meeting-prompts-v1.6"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
@@ -49,12 +50,25 @@ def compact_evidence(value):
 
 class MeetingReader(Reader):
     def __init__(self, segments, title, config, folder, emit, *, purpose="summary"):
-        super().__init__(segments, title, config, folder, emit)
+        # The frozen comparison reader retains its historical 128K ceiling.
+        # Initialize shared context separately, then validate this workflow's
+        # budgets and include the effective pair in its own checkpoint identity.
+        budget_fields = {"dialogueOutputTokens", "dialogueMaxOutputTokens"}
+        super().__init__(segments, title, {k: v for k, v in config.items() if k not in budget_fields}, folder, emit)
+        current_route = (urlsplit(config.get("baseURL", "")).hostname == "api.icompify.com"
+                         and config.get("model") == "deepseek-v4.1-flash")
+        self.initial_output = config.get("dialogueOutputTokens", 131072 if current_route else self.initial_output)
+        self.max_output = config.get("dialogueMaxOutputTokens", 262144 if current_route else self.initial_output)
+        if (type(self.initial_output) is not int or type(self.max_output) is not int
+                or not 256 <= self.initial_output <= self.max_output <= 262144):
+            raise UserError("会议纪要输出预算必须在256至262144之间，扩容上限不得小于初始预算")
+        self.config.update(dialogueOutputTokens=self.initial_output, dialogueMaxOutputTokens=self.max_output)
         self.strategy = config.get("dialogueStrategy", "meeting-v3")
         if self.strategy not in STRATEGIES:
             raise UserError("未知会议纪要流程")
         self.identity = digest({"base": self.identity, "strategy": self.strategy, "version": VERSION,
             "purpose": purpose, "formattingGeneration": config.get("formattingGeneration"),
+            "outputBudgets": [self.initial_output, self.max_output],
             "contract": CONTRACT_VERSION, "promptVersion": PROMPT_VERSION, "partBudget": PART_BUDGET,
             "validationFeedbackChars": VALIDATION_FEEDBACK_CHARS,
             "maxRereads": self.max_rereads,
@@ -95,7 +109,14 @@ class MeetingReader(Reader):
                 write_json(self.folder / self.validation_file, {"identity": self.identity,
                            "failureCount": self.validation_failure_count, "failures": self.validation_failures})
                 raise
-        return super().call(prompt, payload, checked, phase)
+        try:
+            return super().call(prompt, payload, checked, phase)
+        except UserError as error:
+            if "（HTTP 400）" in str(error):
+                raise UserError(f"模型接口拒绝请求参数（HTTP 400）。本流程初始输出上限为{self.initial_output:,}，"
+                                f"扩容上限为{self.max_output:,} Tokens；请确认服务商支持的输出及合计上下文容量。"
+                                "未在参数被拒绝后自动降低预算或再次提交，成功阶段已保留。") from None
+            raise
 
     def draft(self, units, depth=0):
         payload = {"title": self.title, "sources": source_text(units)}
