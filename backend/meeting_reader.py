@@ -371,10 +371,16 @@ class MeetingReader(Reader):
                     issue["diagnostic"] = "no_information_gain"
 
     def cited(self, item, *, statement=True):
-        value = {"id": item["id"], "text": render_item(item) if statement else item["text"],
-                 "source_ids": sorted({s for i in item["u"] for s in self.lookup[i]["source_ids"]})}
         if statement:
-            value["metadata"] = {k: copy.deepcopy(item[k]) for k in ("text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "evidence")}
+            selected = {pid for proof in item["evidence"] for pid in proof["parts"]}
+            source_ids = sorted({sid for uid in item["u"] for part in self.lookup[uid]["parts"]
+                                 if part["id"] in selected for sid in part["source_ids"]})
+        else:
+            source_ids = sorted({sid for uid in item["u"] for sid in self.lookup[uid]["source_ids"]})
+        value = {"id": item["id"], "text": render_item(item) if statement else item["text"],
+                 "source_ids": source_ids}
+        if statement:
+            value["metadata"] = {k: copy.deepcopy(item[k]) for k in ("text", "kind", "state", "conditions", "scope", "speaker", "attribution_parts", "owner", "due", "evidence")}
         if item.get("status"):
             value["status"] = item["status"]
         return value

@@ -229,6 +229,7 @@ public struct MeetingStatementMetadata: Codable, Sendable {
     public let conditions: [String]
     public let scope: String?
     public let speaker: String
+    public let attribution_parts: [Int]?
     public let owner: String?
     public let due: String?
 }

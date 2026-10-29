@@ -313,6 +313,15 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(e.document["chapters"][0]["claims"][0]["conditions"], ["测试通过才发送结果"])
         self.assertEqual(e.patch_log[0]["after"], e.document)
 
+    def test_statement_playback_uses_cited_parts_not_entire_reading_unit(self):
+        e = self.prepared()
+        claim = e.document["chapters"][0]["claims"][0]
+        cited = e.cited(claim)
+        self.assertEqual(cited["source_ids"], [0])
+        self.assertEqual(cited["metadata"]["attribution_parts"], [0])
+        # The overview still references the complete context it summarizes.
+        self.assertEqual(e.cited(e.document["overview"], statement=False)["source_ids"], [0, 1, 2, 3])
+
     def test_cross_range_correction_does_not_reassign_claim_to_another_review_batch(self):
         segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
                      "text": f"第{i}项资料已具备。", "speaker": "B"} for i in range(4)]
