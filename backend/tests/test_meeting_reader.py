@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from common import UserError, read_json, write_json
 from dialogue_context import build_context
+from dialogue_reader import Reader
 from meeting_contract import validate_item, validate_document, punctuation_rows, render_item, anchor
 from meeting_reader import MeetingReader, compact_evidence
 from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted
@@ -155,6 +156,17 @@ class MeetingTests(unittest.TestCase):
         for opts in ({"dialogueStrategy": "meeting-baseline"}, {"reasoningEffort": "low"}, {"dialogueMaxRereads": 0}, {"sourceRevision": "changed"}):
             self.assertNotEqual(self.reader(**opts).identity, original)
         self.assertEqual(self.reader(beforePublish=lambda: None).identity, original)
+
+    def test_expanded_validation_feedback_is_reserved_before_request_fits(self):
+        e = self.reader()
+        payload = {"sources": "一段完整原稿。"}
+        old_size = Reader.request_size(e, "test", payload)
+        e.input_budget = old_size + 1
+        self.assertFalse(e.fits("test", payload))
+        # With sufficient headroom it fits; no source text was shortened.
+        e.input_budget = e.request_size("test", payload)
+        self.assertTrue(e.fits("test", payload))
+        self.assertEqual(payload["sources"], "一段完整原稿。")
 
     def test_quotes_reject_rewritten_terms_and_unknown_speaker_promotion(self):
         e = self.reader(); claim = item(e.units[0])

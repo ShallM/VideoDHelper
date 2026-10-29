@@ -13,6 +13,7 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
     EVIDENCE_PROMPT, REVIEW_PROMPT, REREAD_PROMPT, PUNCTUATE_PROMPT, validate_document,
     validate_item, validate_items, punctuation_rows, render_item, string, anchor)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
+from summary_v2 import estimated_tokens
 
 VERSION = "meeting-reader-v3.7"
 PROMPT_VERSION = "meeting-prompts-v1.3"
@@ -65,6 +66,12 @@ class MeetingReader(Reader):
         self.publication = False
         self.validation_failures = []
         self.validation_failure_count = 0
+
+    def request_size(self, prompt, payload):
+        # The frozen v2 reader reserves 256 tokens for its short correction.
+        # This workflow reports several locations, so reserve its larger
+        # bounded feedback before deciding whether a complete request fits.
+        return super().request_size(prompt, payload) - 256 + estimated_tokens("字" * VALIDATION_FEEDBACK_CHARS) + 128
 
     def call(self, prompt, payload, validator, phase):
         def checked(value):
