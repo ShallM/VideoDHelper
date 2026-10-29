@@ -14,10 +14,31 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
     validate_item, punctuation_rows, render_item, string, anchor)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 
-VERSION = "meeting-reader-v3.2"
+VERSION = "meeting-reader-v3.3"
 PROMPT_VERSION = "meeting-prompts-v1.1"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
+
+
+def compact_evidence(value):
+    """Use source references when the same request already includes the source.
+
+    Persisted evidence remains expanded. Merge-only requests keep their quotes,
+    since they have partial documents instead of the complete source text.
+    """
+    if isinstance(value, list):
+        return [compact_evidence(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {}
+    for key, content in value.items():
+        if key == "evidence":
+            result[key] = [{k: proof[k] for k in ("unit", "first_part", "last_part")}
+                           if all(type(proof.get(k)) is int for k in ("unit", "first_part", "last_part"))
+                           else copy.deepcopy(proof) for proof in content]
+        else:
+            result[key] = compact_evidence(content)
+    return result
 
 
 class MeetingReader(Reader):
@@ -297,7 +318,7 @@ class MeetingReader(Reader):
             targets = {k: v for k, v in targets.items() if k in target_ids or set(v["value"]["u"]).issubset(visible)}
             payload.update(sources=source_text(units), targets=list(targets.values()))
         try:
-            value = self.call(REVIEW_PROMPT, payload,
+            value = self.call(REVIEW_PROMPT, compact_evidence(payload),
                 lambda v: self.validate_repair(v, units, targets, target_ids, checks), "meeting_review")
         except InputContextLimit:
             if len(owned) < 2 or depth >= 12:
@@ -335,7 +356,7 @@ class MeetingReader(Reader):
                 payload = {"issue": issue, "sources": source, "targets": list(targets.values())}
                 self.emit("reread", f"核对具体疑点 · 第 {round_index + 1} 轮，已处理 {len(self.reread_keys)} 项…")
                 try:
-                    value = self.call(REREAD_PROMPT, payload,
+                    value = self.call(REREAD_PROMPT, compact_evidence(payload),
                         lambda v: self.validate_repair(v, units, targets, set(targets), {}, reread=True), "meeting_reread")
                 except InputContextLimit:
                     issue["diagnostic"] = "evidence_exceeds_budget"

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from common import UserError, read_json, write_json
 from dialogue_context import build_context
 from meeting_contract import validate_item, validate_document, punctuation_rows, render_item, anchor
-from meeting_reader import MeetingReader
+from meeting_reader import MeetingReader, compact_evidence
 from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted
 from worker import validate_request
 
@@ -152,6 +152,17 @@ class MeetingTests(unittest.TestCase):
         repeated = build_context([{**transcript()[0], "text": "是", "speaker": "A"}, {**transcript()[1], "text": "是", "speaker": "B"}])
         located = anchor({"unit": 0, "first_part": 1, "last_part": 1}, {0: repeated[0]})
         self.assertEqual((located["start"], located["end"], located["parts"]), (1, 2, [1]))
+
+    def test_compact_review_evidence_round_trips_without_losing_claim_or_source(self):
+        e = self.reader(); original = document(e.units)
+        validate_document(original, e.units)
+        compact = compact_evidence(original)
+        self.assertNotIn("quote", compact["chapters"][0]["claims"][0]["evidence"][0])
+        self.assertIn("quote", original["chapters"][0]["claims"][0]["evidence"][0])
+        validate_document(compact, e.units)
+        self.assertEqual(compact, original)
+        legacy = {"evidence": [{"unit": 0, "quote": "旧引用"}]}
+        self.assertEqual(compact_evidence(legacy), legacy)
 
     def test_rendering_keeps_condition_scope_state_and_action_deadline_separate(self):
         e = self.reader()
