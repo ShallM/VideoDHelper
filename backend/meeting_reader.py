@@ -14,7 +14,7 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
     validate_item, punctuation_rows, render_item, string, anchor)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 
-VERSION = "meeting-reader-v3.0"
+VERSION = "meeting-reader-v3.1"
 PROMPT_VERSION = "meeting-prompts-v1.0"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
@@ -108,14 +108,14 @@ class MeetingReader(Reader):
         neighbours = [u for u in select_context(self.units, sorted(context_ids)) if u["id"] not in context_ids]
         payload = {"sources": source_text(units), "owned_parts": ids, "context": source_text(neighbours)}
         try:
-            value = self.call(PUNCTUATE_PROMPT, payload, lambda v: punctuation_rows(v, units), "meeting_punctuation")
+            value = self.call(PUNCTUATE_PROMPT, payload, lambda v: punctuation_rows(v, units, all_units=self.units), "meeting_punctuation")
         except (InputContextLimit, ResponseOutputLimit):
             if len(units) < 2 or depth >= 12:
                 raise
             middle = len(units) // 2
             return self.punctuate(units[:middle], depth + 1) + self.punctuate(units[middle:], depth + 1)
         self.condense_batches += 1
-        return punctuation_rows(value, units)
+        return punctuation_rows(value, units, all_units=self.units)
 
     def identify(self, document):
         self.document = copy.deepcopy(document)
@@ -303,9 +303,12 @@ class MeetingReader(Reader):
                              key=lambda i: (priorities[i["kind"]], i["id"]))[:min(3, self.max_rereads - len(self.reread_keys))]
             for issue in pending:
                 self.reread_keys.add(issue["id"])
-                units, source = self.read_sources(issue["u"], issue["query"])
-                ids = {u["id"] for u in units}
-                targets = {k: t for k, t in self.meeting_targets().items() if k == issue["target_id"] or set(t["value"]["u"]).issubset(ids)}
+                # Evidence in the same range is context, not permission to edit
+                # every nearby claim. A check may link to more than one claim.
+                linked = {issue["target_id"]} | set(self.assessments.get(issue["target_id"], {}).get("target_ids", []))
+                targets = {k: t for k, t in self.meeting_targets().items() if k in linked}
+                related = set(issue["u"]) | {i for t in targets.values() for i in t["value"]["u"]}
+                units, source = self.read_sources(sorted(related), issue["query"])
                 payload = {"issue": issue, "sources": source, "targets": list(targets.values())}
                 self.emit("reread", f"核对具体疑点 · 第 {round_index + 1} 轮，已处理 {len(self.reread_keys)} 项…")
                 try:

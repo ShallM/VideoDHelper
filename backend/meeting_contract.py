@@ -203,7 +203,7 @@ def render_item(item):
     return result
 
 
-def punctuation_rows(value, units):
+def punctuation_rows(value, units, *, all_units=None):
     """Apply only anchored punctuation insertions; ownership never changes."""
     parts = [p for u in units for p in u["parts"]]
     lookup = {p["id"]: p for p in parts}
@@ -222,10 +222,13 @@ def punctuation_rows(value, units):
         raise ValueError("rows必须按顺序覆盖owned_parts恰好一次")
     inserts, seen = {}, set()
     offsets, position = {}, 0
-    for p in parts:
+    # Batch boundaries are transport details. Check the neighboring original
+    # character even when it belongs to another punctuation request.
+    context_parts = [p for u in all_units for p in u["parts"]] if all_units is not None else parts
+    for p in context_parts:
         offsets[p["id"]] = position
         position += len(p["text"])
-    full_text = "".join(p["text"] for p in parts)
+    full_text = "".join(p["text"] for p in context_parts)
     if not isinstance(value["insertions"], list) or len(value["insertions"]) > 2000:
         raise ValueError("insertions须为有限标点插入列表")
     for edit in value["insertions"]:

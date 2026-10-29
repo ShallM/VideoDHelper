@@ -147,6 +147,9 @@ class MeetingTests(unittest.TestCase):
         split = build_context([{**transcript()[0], "text": "2", "speaker": "A"}, {**transcript()[1], "text": ".05", "speaker": "unknown"}])
         with self.assertRaises(ValueError):
             punctuation_rows({"rows": [{"first": 0, "last": 1}], "insertions": [{"part_id": 0, "offset": 1, "text": "，"}]}, split)
+        first_batch = [{**split[0], "parts": [split[0]["parts"][0]]}]
+        with self.assertRaises(ValueError):
+            punctuation_rows({"rows": [{"first": 0, "last": 0}], "insertions": [{"part_id": 0, "offset": 1, "text": "，"}]}, first_batch, all_units=split)
 
     def test_rows_cannot_skip_short_answer_or_reorder_ownership(self):
         units = build_context(transcript())
@@ -182,6 +185,69 @@ class MeetingTests(unittest.TestCase):
         e = self.prepared(); p = empty_review()
         p["issues"] = [{"target_id": "claim-0", "field": "text", "kind": "audio", "question": "回听", "u": [0], "query": "", "status": "needs_audio"}]
         e.apply_repair(p, "review"); e.reread(); self.assertEqual(e.reread_count, 0)
+
+    def test_reread_cannot_edit_unrelated_claim_in_the_same_source_range(self):
+        e = self.prepared()
+        unrelated = {**copy.deepcopy(e.document["chapters"][0]["claims"][0]), "id": "claim-other"}
+        e.document["chapters"][0]["claims"].append(unrelated)
+        p = empty_review()
+        p["issues"] = [{"target_id": "claim-0", "field": "state", "kind": "state", "question": "资料有无准备？", "u": [0], "query": "资料", "status": "unresolved"}]
+        e.apply_repair(p, "review")
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            e.reread()
+        sent = next(payload for phase, payload, _ in self.requests if phase == "meeting_reread")
+        self.assertEqual([target["id"] for target in sent["targets"]], ["claim-0"])
+        self.assertEqual(e.document["chapters"][0]["claims"][1], unrelated)
+
+    def test_input_limit_splits_complete_responsibility_ranges_and_preserves_end(self):
+        # Each source is separated by a genuine gap; no arbitrary character cuts.
+        segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
+                     "text": f"第{i}项资料已具备。", "speaker": "B"} for i in range(8)]
+        e = self.reader(segments)
+        def constrained(prompt, payload, validator, phase):
+            ids = [int(i) for i in re.findall(r"\[u(\d+)\]", payload.get("sources", ""))]
+            if phase in ("meeting_draft", "meeting_evidence") and len(ids) > 2:
+                raise InputContextLimit("synthetic context limit")
+            if phase == "meeting_review" and len(payload["owned_checks"]) > 2:
+                raise InputContextLimit("synthetic review limit")
+            units = [u for u in e.units if u["id"] in ids]
+            if phase == "meeting_merge":
+                docs = payload["partial_documents"]
+                value = {"overview": docs[0]["overview"], "chapters": [c for d in docs for c in d["chapters"]],
+                         "action_items": [], "uncertainties": []}
+            elif phase == "meeting_draft":
+                value = document(units)
+                value["chapters"][0]["claims"] = [item(u, text=u["text"]) for u in units]
+            elif phase == "meeting_evidence":
+                value = {"items": [item(u, text=u["text"]) for u in units],
+                         "coverage": [{"unit": i, "disposition": "substantive"} for i in payload["owned_units"]]}
+            elif phase == "meeting_review":
+                value = empty_review(payload["owned_checks"], payload["owned_targets"])
+            else:
+                raise AssertionError(phase)
+            validator(value)
+            return value
+        with patch.object(e, "call", side_effect=constrained):
+            e.identify(e.draft(e.units)); e.inventory(e.units); e.review_range(e.units)
+        self.assertEqual(e.route, "hierarchical")
+        self.assertEqual([c["u"][0] for ch in e.document["chapters"] for c in ch["claims"]], list(range(8)))
+        self.assertEqual([c["unit"] for c in e.source_coverage], list(range(8)))
+        self.assertEqual(e.reviewed, set(range(8)))
+        self.assertEqual(len(e.assessments), 8)
+        self.assertEqual(e.review_batches, 4)
+
+    def test_local_patch_preserves_prior_result_and_records_state_condition_evidence(self):
+        e = self.prepared(); before = copy.deepcopy(e.document)
+        replacement = item(e.units[0], text="先复现程序", kind="proposal", state="pending", conditions=["测试通过才发送结果"])
+        proposal = empty_review(e.checks, e.meeting_targets())
+        proposal["patches"] = [{"target_id": "claim-0", "action": "replace", "replacement": replacement,
+                               "reason": "保留动作的测试前提", "check_ids": list(e.checks)}]
+        e.validate_repair(proposal, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks)
+        self.assertTrue(e.apply_repair(proposal, "review"))
+        self.assertEqual(e.patch_log[0]["before"], before)
+        self.assertEqual(e.document["chapters"][0]["claims"][0]["id"], "claim-0")
+        self.assertEqual(e.document["chapters"][0]["claims"][0]["conditions"], ["测试通过才发送结果"])
+        self.assertEqual(e.patch_log[0]["after"], e.document)
 
     def test_cancel_after_independent_evidence_resumes_successful_stages(self):
         def stop(client, body, phase, payload):
