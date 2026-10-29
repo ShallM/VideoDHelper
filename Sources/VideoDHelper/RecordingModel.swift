@@ -197,7 +197,7 @@ extension WorkspaceModel {
                     for claim in claims { lines += [displayText(claim.text), "[" + sourceLabel(claim.source_ids) + "]", ""] }
                 } else { lines += [displayText(chapter.detail), "[" + sourceLabel(chapter.source_ids) + "]", ""] }
             }
-            for (heading, items) in [("主要观点与明确安排", notes.key_points), ("待核对内容", notes.uncertainties)] where !items.isEmpty {
+            for (heading, items) in [("主要观点与明确安排", notes.key_points), ("明确行动与前提", notes.action_items ?? []), ("待核对内容", notes.uncertainties)] where !items.isEmpty {
                 lines += ["## " + heading, ""]
                 for item in items { lines += [displayText(item.text), "[" + sourceLabel(item.source_ids) + "]", ""] }
             }

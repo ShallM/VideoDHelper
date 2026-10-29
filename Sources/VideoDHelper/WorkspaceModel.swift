@@ -419,8 +419,8 @@ final class WorkspaceModel: ObservableObject {
         let ext = notesExport || condensedExport ? "md" : format
         let suffix = notesExport ? (isRecording ? "对话总结" : "学习笔记") : condensedExport ? (isRecording ? "整理对话" : "精简台词") : "原稿"
         panel.title = "导出\(suffix)"
-        panel.nameFieldStringValue = "\(title.replacingOccurrences(of: "/", with: "-")) · \(suffix).\(ext)"
         panel.allowedContentTypes = [UTType(filenameExtension: ext) ?? .plainText]
+        panel.nameFieldStringValue = "\(title.replacingOccurrences(of: "/", with: "-")) · \(suffix).\(ext)"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let content: String
@@ -434,7 +434,7 @@ final class WorkspaceModel: ObservableObject {
             else if format == "srt" { content = TranscriptExport.srt(segments) }
             else { content = (format == "md" ? "# \(title)\n\n来源：\(source)\n\n" : "") + TranscriptExport.text(segments) }
             try content.write(to: url, atomically: true, encoding: .utf8)
-            status = "已导出：\(url.lastPathComponent)"
+            if !isBusy { status = "已导出：\(url.lastPathComponent)" }
         } catch { self.error = error.localizedDescription }
     }
     func revealJob() { if let job = currentJob { NSWorkspace.shared.open(job.directory) } }
