@@ -277,7 +277,10 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(e.review_batches, 4)
 
     def test_compact_merge_rejects_source_evidence_not_present_in_parent_records(self):
-        segments = transcript() + [{"id": 4, "start": 30., "end": 33.,
+        # Repeated wording is not permission to cite another person's occurrence.
+        segments = [{"id": 0, "start": 0., "end": 2., "text": "资料已具备。", "speaker": "B"},
+                    {"id": 1, "start": 2., "end": 4., "text": "资料已具备。", "speaker": "A"},
+                    {"id": 2, "start": 30., "end": 33.,
                                    "text": "另一项工作尚未开始。", "speaker": "A"}]
         e = self.reader(segments)
         def constrained(prompt, payload, validator, phase):

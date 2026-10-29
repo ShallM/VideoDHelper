@@ -89,7 +89,7 @@ class MeetingReader(Reader):
             self.route = "hierarchical"
             middle = len(units) // 2
             documents = [self.draft(units[:middle], depth + 1), self.draft(units[middle:], depth + 1)]
-            anchors = {(p["unit"], p["quote"]) for d in documents
+            anchors = {(p["unit"], p["start"], p["end"]) for d in documents
                        for i in [*(c for ch in d["chapters"] for c in ch["claims"]), *d["action_items"]]
                        for p in i["evidence"]}
             merged = {"title": self.title, "partial_documents": compact_evidence(documents),
@@ -97,7 +97,7 @@ class MeetingReader(Reader):
             def validate(value):
                 validate_document(value, units)
                 for item in [*(c for ch in value["chapters"] for c in ch["claims"]), *value["action_items"]]:
-                    if any((p["unit"], p["quote"]) not in anchors for p in item["evidence"]):
+                    if any((p["unit"], p["start"], p["end"]) not in anchors for p in item["evidence"]):
                         raise ValueError("分层合并只能使用已读取候选的逐字证据，不能新增引文")
             try:
                 return self.call(DRAFT_PROMPT, merged, validate, "meeting_merge")
