@@ -260,17 +260,26 @@ public struct StudyNotes: Codable, Sendable {
 }
 
 /// One publication generation: notes and cleaned dialogue are always read together.
+public struct DialogueFormatting: Codable, Sendable {
+    public let status: String
+    public let message: String
+    public var model: String? = nil
+    public var isComplete: Bool { status == "completed" }
+}
+
 public struct DialogueResultsBundle: Codable, Sendable {
     public let schemaVersion: Int
     public let generationID: String
     public let notes: StudyNotes
     public let condensed: [CitedText]
     public var strategy: String? = nil
+    public var formatting: DialogueFormatting? = nil
 }
 
 public struct RecordingResults: Sendable {
     public let notes: StudyNotes?
     public let condensed: [CitedText]
+    public var formatting: DialogueFormatting? = nil
 
     public static func load(from directory: URL) throws -> RecordingResults {
         let bundleURL = directory.appendingPathComponent("dialogue-results.json")
@@ -290,7 +299,7 @@ public struct RecordingResults: Sendable {
                     throw VideoError.toolFailed("录音任务流程与成套成果不一致，可能曾被旧版应用更新。已保留原稿和所有成果文件；请从原稿新建对照任务重新整理，不会自动选择或混用两代结果。")
                 }
             }
-            return RecordingResults(notes: bundle.notes, condensed: bundle.condensed)
+            return RecordingResults(notes: bundle.notes, condensed: bundle.condensed, formatting: bundle.formatting)
         }
         // Older tasks have no bundle. Once a bundle exists, a failed decode must
         // never fall back to individual files that may belong to other generations.

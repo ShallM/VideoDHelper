@@ -6,17 +6,17 @@ publication, provenance, deduplication and budgets. No external tools or agents.
 import copy
 import time
 
-from common import UserError, digest, write_json
+from common import UserError, digest, read_json, write_json
 from dialogue_context import source_text, select_context
 from dialogue_reader import Reader, condensed_batches, citations, validate_reader_text
 from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, DRAFT_PROMPT,
     EVIDENCE_PROMPT, REVIEW_PROMPT, REREAD_PROMPT, PUNCTUATE_PROMPT, validate_document,
-    validate_item, validate_items, punctuation_rows, render_item, string, anchor)
-from summary import ChatClient, InputContextLimit, ResponseOutputLimit
+    validate_item, validate_items, punctuation_rows, render_item, string, anchor, OPTIONAL_DEFAULTS)
+from summary import ChatClient, InputContextLimit, ResponseOutputLimit, OutputLimit
 from summary_v2 import estimated_tokens
 
-VERSION = "meeting-reader-v3.11"
-PROMPT_VERSION = "meeting-prompts-v1.5"
+VERSION = "meeting-reader-v3.12"
+PROMPT_VERSION = "meeting-prompts-v1.6"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
 VALIDATION_FEEDBACK_CHARS = 1600
@@ -35,6 +35,9 @@ def compact_evidence(value):
         return value
     result = {}
     for key, content in value.items():
+        if "evidence" in value and "text" in value and key in OPTIONAL_DEFAULTS:
+            if content == OPTIONAL_DEFAULTS[key] and not (key == "state" and value.get("kind") in ("action", "proposal", "decision")):
+                continue
         if key == "evidence":
             result[key] = [{k: proof[k] for k in ("unit", "first_part", "last_part")}
                            if all(type(proof.get(k)) is int for k in ("unit", "first_part", "last_part"))
@@ -45,12 +48,13 @@ def compact_evidence(value):
 
 
 class MeetingReader(Reader):
-    def __init__(self, segments, title, config, folder, emit):
+    def __init__(self, segments, title, config, folder, emit, *, purpose="summary"):
         super().__init__(segments, title, config, folder, emit)
         self.strategy = config.get("dialogueStrategy", "meeting-v3")
         if self.strategy not in STRATEGIES:
             raise UserError("未知会议纪要流程")
         self.identity = digest({"base": self.identity, "strategy": self.strategy, "version": VERSION,
+            "purpose": purpose, "formattingGeneration": config.get("formattingGeneration"),
             "contract": CONTRACT_VERSION, "promptVersion": PROMPT_VERSION, "partBudget": PART_BUDGET,
             "validationFeedbackChars": VALIDATION_FEEDBACK_CHARS,
             "maxRereads": self.max_rereads,
@@ -63,6 +67,10 @@ class MeetingReader(Reader):
         self.evidence_batches, self.review_batches = 0, 0
         self.source_coverage, self.stage_times = [], {}
         self.review_target_owners = {}
+        self.issue_context = {}
+        self.review_responsibility = []
+        self.skipped_rereads = 0
+        self.validation_file = "formatting-validation.json" if purpose == "formatting" else "meeting-validation.json"
         self.publication = False
         self.validation_failures = []
         self.validation_failure_count = 0
@@ -84,7 +92,7 @@ class MeetingReader(Reader):
                                                  "candidate": copy.deepcopy(value)})
                 self.validation_failure_count += 1
                 self.validation_failures = self.validation_failures[-12:]
-                write_json(self.folder / "meeting-validation.json", {"identity": self.identity,
+                write_json(self.folder / self.validation_file, {"identity": self.identity,
                            "failureCount": self.validation_failure_count, "failures": self.validation_failures})
                 raise
         return super().call(prompt, payload, checked, phase)
@@ -127,16 +135,6 @@ class MeetingReader(Reader):
             for item in value["items"]:
                 if not ids.intersection(item["u"]):
                     raise ValueError("核对项必须涉及本批owned_units，不能只复述邻接背景")
-            coverage = value.get("coverage")
-            if (not isinstance(coverage, list) or len(coverage) != len(ids)
-                    or any(type(c.get("unit")) is not int for c in coverage)
-                    or {c["unit"] for c in coverage} != ids):
-                raise ValueError("coverage必须恰好覆盖每个owned_units一次")
-            for c in coverage:
-                if c.get("disposition") not in ("substantive", "incidental"):
-                    raise ValueError("disposition须为substantive或incidental")
-                if c["disposition"] == "substantive" and not any(c["unit"] in i["u"] for i in value["items"]):
-                    raise ValueError("有实质信息的单元必须关联至少一项逐字证据")
         try:
             value = self.call(EVIDENCE_PROMPT, payload, validate, "meeting_evidence")
         except InputContextLimit:
@@ -146,7 +144,8 @@ class MeetingReader(Reader):
             self.inventory(units[:middle], depth + 1); self.inventory(units[middle:], depth + 1)
             return
         self.evidence_batches += 1
-        self.source_coverage.extend(value["coverage"])
+        # This is request responsibility, not a model's claim of completeness.
+        self.source_coverage.append({"ownedUnits": sorted(ids), "contextUnits": [u["id"] for u in neighbours]})
         for item in value["items"]:
             identity = "check-" + digest({k: item[k] for k in ("text", "kind", "state", "evidence")})[:20]
             self.checks.setdefault(identity, {**copy.deepcopy(item), "id": identity})
@@ -199,6 +198,9 @@ class MeetingReader(Reader):
 
     def validate_repair(self, value, units, targets, owned_targets, owned_checks, *, reread=False):
         allowed = {u["id"]: u for u in units}
+        # Old diagnostic candidates remain readable, but a mechanical per-check
+        # verdict is no longer required from the model or counted as accuracy.
+        value.setdefault("assessments", [])
         for key, maximum in (("patches", 60), ("additions", 60), ("issues", 24), ("assessments", 600)):
             if not isinstance(value.get(key), list) or len(value[key]) > maximum:
                 raise ValueError(f"{key}必须是有限列表")
@@ -218,8 +220,6 @@ class MeetingReader(Reader):
             if assessment["status"] == "covered" and not target_ids:
                 raise ValueError("covered必须指向实际保留该事实的声明")
             string(assessment.get("reason"))
-        if seen != set(owned_checks):
-            raise ValueError("assessments必须恰好覆盖owned_checks一次")
         mutated = set()
         for patch in value["patches"]:
             tid = patch.get("target_id")
@@ -362,6 +362,12 @@ class MeetingReader(Reader):
             self.review_range(owned[:middle], depth + 1); self.review_range(owned[middle:], depth + 1)
             return
         self.apply_repair(value, "review")
+        provided = {u["id"] for u in units}
+        for issue in value["issues"]:
+            key = "issue-" + digest({"target": issue["target_id"], "field": issue["field"]})[:20]
+            self.issue_context.setdefault(key, set()).update(provided)
+        self.review_responsibility.append({"ownedUnits": sorted(ids), "providedUnits": sorted(provided),
+                                           "checkIDs": sorted(checks), "targetIDs": sorted(target_ids)})
         self.reviewed.update(ids); self.review_batches += 1
 
     def read_sources(self, ids, query):
@@ -388,6 +394,12 @@ class MeetingReader(Reader):
                 targets = {k: t for k, t in self.meeting_targets().items() if k in linked}
                 related = set(issue["u"]) | {i for t in targets.values() for i in t["value"]["u"]}
                 units, source = self.read_sources(sorted(related), issue["query"])
+                # A second request over the same full transcript adds no source
+                # evidence. Keep the doubt visible instead of paying to repeat it.
+                if not ({u["id"] for u in units} - self.issue_context.get(issue["id"], set())):
+                    self.skipped_rereads += 1
+                    issue["diagnostic"] = "no_additional_source_context"
+                    continue
                 payload = {"issue": issue, "sources": source, "targets": list(targets.values())}
                 self.emit("reread", f"核对具体疑点 · 第 {round_index + 1} 轮，已处理 {len(self.reread_keys)} 项…")
                 try:
@@ -450,13 +462,16 @@ class MeetingReader(Reader):
                  "reviewedParagraphs": len(self.reviewed), "paragraphCount": len(self.units), "rereadCount": self.reread_count,
                  "sourceKind": "recording", "sourceRevision": self.source_revision, "recordingRevision": self.config.get("recordingRevision", "original"),
                  "evidenceItemCount": len(self.checks), "assessmentCount": len(self.assessments)}
+        return notes, self.dialogue_rows()
+
+    def dialogue_rows(self):
         rows = []
         for index, row in enumerate(self.dialogue):
             parts = [{"id": f"part-{p['id']}", "speaker": p["speaker"], "text": p["text"], "source_ids": p["source_ids"],
                       "spans": p["spans"], "punctuationInsertions": p["punctuation_insertions"]} for p in row["parts"]]
             rows.append({"id": f"row-{index}", "text": "".join(p["text"] for p in parts), "parts": parts, "continuousReading": True,
                          "source_ids": sorted({s for p in parts for s in p["source_ids"]})})
-        return notes, rows
+        return rows
 
     def stage(self, name, operation):
         started = time.monotonic()
@@ -479,13 +494,16 @@ class MeetingReader(Reader):
                 self.emit("review", "对照原文与独立证据，检查遗漏、状态和归属…")
                 self.stage("review", lambda: self.review_range(self.units))
                 self.stage("reread", self.reread)
-            self.emit("condense", "整理阅读行与标点，保留所有原话和局部归属…")
-            self.dialogue = self.stage("punctuation", lambda: self.punctuate(self.units))
+            # A usable reading copy is deterministic. Optional punctuation is a
+            # separate explicit operation and cannot hold the notes hostage.
+            self.dialogue = punctuation_rows({"rows": [{"first": u["parts"][0]["id"], "last": u["parts"][-1]["id"]}
+                                                       for u in self.units], "insertions": []}, self.units)
             notes, rows = self.outputs()
             if callback := self.config.get("beforePublish"):
                 callback()
             write_json(self.folder / "dialogue-results.json", {"schemaVersion": 2, "generationID": self.identity,
-                       "strategy": self.strategy, "notes": notes, "condensed": rows})
+                       "strategy": self.strategy, "notes": notes, "condensed": rows,
+                       "formatting": {"status": "not_requested", "message": "原话已连续排版；可单独优化断句与标点。"}})
             self.publication = True
             for name, value in (("notes.json", notes), ("condensed.json", rows), ("chapters.json", notes["chapters"])):
                 write_json(self.folder / name, value)
@@ -495,6 +513,8 @@ class MeetingReader(Reader):
             write_json(self.folder / "meeting-review.json", {"identity": self.identity, "assessments": list(self.assessments.values()),
                        "issues": list(self.issues.values()), "repairs": self.patch_log, "reviewedUnits": sorted(self.reviewed),
                        "targetOwnership": self.review_target_owners,
+                       "reviewResponsibility": self.review_responsibility,
+                       "issueContext": {k: sorted(v) for k, v in self.issue_context.items()},
                        "readUnits": list(self.retrieval_cache), "rereadKeys": sorted(self.reread_keys)})
             write_json(self.folder / "summary-run.json", {"version": VERSION, "strategy": self.strategy, "promptVersion": PROMPT_VERSION,
                        "identity": self.identity, "completed": complete, "published": self.publication, "route": self.route,
@@ -505,9 +525,63 @@ class MeetingReader(Reader):
                        "assessments": len(self.assessments), "evidenceBatches": self.evidence_batches, "reviewBatches": self.review_batches,
                        "rereadCount": self.reread_count, "duplicateIssues": self.duplicate_issues, "retrievalCacheHits": self.retrieval_hits,
                        "noProgressRereads": self.no_progress, "condenseBatches": self.condense_batches,
+                       "skippedRereadsWithoutNewContext": self.skipped_rereads,
                        "validationFailures": self.validation_failure_count,
                        "changedRepairBatches": sum(p["changed"] for p in self.patch_log)})
 
 
 def summarize(segments, title, config, folder, emit):
     return MeetingReader(segments, title, config, folder, emit).run()
+
+
+def format_dialogue(segments, title, config, folder, emit):
+    """Independent optional edit: never regenerate or rewrite published notes."""
+    path = folder / "dialogue-results.json"
+    if not path.exists():
+        raise UserError("请先完成会议纪要，再单独优化断句与标点。")
+    bundle = read_json(path)
+    notes = bundle.get("notes", {})
+    if (bundle.get("schemaVersion") != 2 or not bundle.get("generationID")
+            or bundle.get("strategy") not in STRATEGIES
+            or bundle["strategy"] != config.get("dialogueStrategy")
+            or notes.get("summaryStrategy") != bundle["strategy"]
+            or notes.get("sourceRevision") != config.get("sourceRevision")
+            or notes.get("recordingRevision", "original") != config.get("recordingRevision", "original")):
+        raise UserError("原稿、校订或流程与已有纪要不一致，请先重新生成纪要；现有成果已保留。")
+    engine = MeetingReader(segments, title, {**config, "formattingGeneration": bundle["generationID"]},
+                           folder, emit, purpose="formatting")
+    original = digest(bundle)
+    complete = False
+
+    def publish(status, message, rows=None):
+        if callback := config.get("beforePublish"):
+            callback()
+        if digest(read_json(path)) != original:
+            raise UserError("纪要成果已变化，本次标点结果未覆盖当前成果。")
+        result = {**bundle, "formatting": {"status": status, "message": message, "identity": engine.identity,
+                  "model": config["model"], "tokensThisRun": engine.client.total_tokens}}
+        if rows is not None:
+            result["condensed"] = rows
+        write_json(path, result)
+        if rows is not None:
+            write_json(folder / "condensed.json", rows)
+        return notes, result["condensed"]
+
+    try:
+        emit("condense", "单独优化断句与标点，已完成的纪要保持可用…")
+        try:
+            engine.dialogue = engine.stage("punctuation", lambda: engine.punctuate(engine.units))
+        except (KeyboardInterrupt, SystemExit):
+            publish("cancelled", "标点优化已取消，纪要与原有整理稿保留；可继续已保存的阶段。")
+            raise
+        except (UserError, ValueError, KeyError, TypeError, OutputLimit) as error:
+            return publish("failed", "标点优化未完成，纪要与原有整理稿保留。" + str(error)[:500])
+        result = publish("completed", "断句与标点已优化，原话字符及局部归属保持不变。", engine.dialogue_rows())
+        complete = True
+        return result
+    finally:
+        write_json(folder / "formatting-run.json", {"version": VERSION, "identity": engine.identity,
+                   "completed": complete, "elapsedSeconds": round(time.monotonic() - engine.started, 3),
+                   "stageSeconds": engine.stage_times, "requests": engine.client.request_count,
+                   "checkpointHits": engine.client.cache_hits, "tokensThisRun": engine.client.total_tokens,
+                   "calls": engine.client.calls, "validationFailures": engine.validation_failure_count})

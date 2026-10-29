@@ -257,6 +257,7 @@ struct DialogueStrategyTests {
         request.dialogueStrategy = "meeting-v3"; try AppStorage.write(request, to: requestURL)
         let result = try RecordingResults.load(from: fixture.folder)
         #expect(result.notes?.isMeeting == true)
+        #expect(result.formatting == nil)
         #expect(result.notes?.action_items?.first?.metadata?.conditions == ["测试通过"])
         #expect(result.notes?.action_items?.first?.metadata?.due == nil)
         #expect(result.notes?.action_items?.first?.metadata?.attribution_parts == nil)
@@ -267,6 +268,15 @@ struct DialogueStrategyTests {
         #expect(result.condensed.first?.dialogueText(names: [:]) == "[归属未确定] 不。")
         try FileManager.default.removeItem(at: requestURL)
         #expect(try RecordingResults.load(from: fixture.folder).notes?.isMeeting == true)
+        var withFormatting = try JSONSerialization.jsonObject(with: bundle) as! [String: Any]
+        for status in ["not_requested", "failed", "cancelled", "completed"] {
+            withFormatting["formatting"] = ["status": status, "message": "纪要保留。"]
+            try JSONSerialization.data(withJSONObject: withFormatting).write(to: fixture.folder.appendingPathComponent("dialogue-results.json"))
+            let loaded = try RecordingResults.load(from: fixture.folder)
+            #expect(loaded.notes?.overview == result.notes?.overview)
+            #expect(loaded.condensed.first?.text == result.condensed.first?.text)
+            #expect(loaded.formatting?.isComplete == (status == "completed"))
+        }
         let invalid = String(decoding: bundle, as: UTF8.self).replacingOccurrences(of: "\"strategy\":\"meeting-v3\"", with: "\"strategy\":\"meeting-baseline\"")
         try Data(invalid.utf8).write(to: fixture.folder.appendingPathComponent("dialogue-results.json"))
         #expect(throws: (any Error).self) { try RecordingResults.load(from: fixture.folder) }

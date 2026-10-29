@@ -21,6 +21,7 @@ final class WorkspaceModel: ObservableObject {
     @Published var selectedTrackID = ""
     @Published var segments: [TranscriptSegment] = []
     @Published var condensed: [CitedText] = []
+    @Published var dialogueFormatting: DialogueFormatting?
     @Published var notes: StudyNotes?
     @Published var title = "把视频变成学习笔记"
     @Published var source = ""
@@ -111,7 +112,7 @@ final class WorkspaceModel: ObservableObject {
         playback.stop(); recordingURL = nil; recordingDuration = 0; editsRevision = "original"
         speakerNames = ["A": "说话人 A", "B": "说话人 B"]
         metadata = nil; currentJob = nil; selectedTrackID = ""; link = ""
-        segments = []; condensed = []; notes = nil; source = ""; title = workspace == .bilibili ? "把视频变成学习笔记" : "整理一段对话"
+        segments = []; condensed = []; notes = nil; dialogueFormatting = nil; source = ""; title = workspace == .bilibili ? "把视频变成学习笔记" : "整理一段对话"
         controlsExpanded = true
         selectedTab = 0; stage = ""; progress = nil; error = nil
         applyDefaults()
@@ -307,7 +308,7 @@ final class WorkspaceModel: ObservableObject {
         guard let job = currentJob, canResume else { return }
         if isRecording,
            let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")),
-           request.recordingAction != "summarize" { transcribeRecording(); return }
+           (request.recordingAction ?? "transcribe") == "transcribe" { transcribeRecording(); return }
         start(status: "继续任务，复用已保存的原稿与完成的分段…") {
             try self.requireASRIfNeeded()
             try await self.run(job)
@@ -372,9 +373,9 @@ final class WorkspaceModel: ObservableObject {
         if workspace == .recording {
             do {
                 let results = try RecordingResults.load(from: job.directory)
-                notes = results.notes; condensed = results.condensed
+                notes = results.notes; condensed = results.condensed; dialogueFormatting = results.formatting
             } catch {
-                notes = nil; condensed = []
+                notes = nil; condensed = []; dialogueFormatting = nil
                 self.error = (error as? VideoError)?.localizedDescription
                     ?? "录音整理成果无法完整读取，已保留原稿与成果文件。请重新整理或恢复成果文件；未混用旧版结果。"
             }

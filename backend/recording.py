@@ -358,6 +358,8 @@ def run_recording(request, record, folder, support, emit, load_config, env_file=
             config["beforePublish"] = before_publish
             if strategy == "context-v2":
                 from dialogue_reader import summarize
+            elif request.get("recordingAction") == "format":
+                from meeting_reader import format_dialogue as summarize
             else:
                 from meeting_reader import summarize
         elif strategy == "legacy":
@@ -366,8 +368,13 @@ def run_recording(request, record, folder, support, emit, load_config, env_file=
             raise UserError("录音理解方案无法识别，请更新应用后重试。")
         notes, condensed = summarize(segments, request["title"], config, folder, emit)
         export_dialogue(folder, request["title"], segments, names, notes, condensed)
+        message = "对话原稿、整理对话与总结已保存。"
+        if strategy in ("meeting-v3", "meeting-baseline"):
+            formatting = read_json(folder / "dialogue-results.json").get("formatting", {})
+            message = (formatting.get("message", message) if request.get("recordingAction") == "format"
+                       else "纪要已保存；整理稿保留原话，可在“整理对话”中单独优化断句与标点。")
         record.update(state="completed", stage="completed", progress=1.0, updatedAt=time.time(),
-            message="对话原稿、整理对话与总结已保存。", segmentCount=len(segments), sourceKind="recording", summarySourceRevision=revision,
+            message=message, segmentCount=len(segments), sourceKind="recording", summarySourceRevision=revision,
             dialogueStrategy=strategy)
     write_json(folder / "job.json", record)
     print(json.dumps({"stage": record["stage"], "message": record["message"], "progress": 1}, ensure_ascii=False), flush=True)

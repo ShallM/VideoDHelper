@@ -25,6 +25,9 @@ struct ASRModelTests {
         #expect(!ASRTaskSelection.needsModel(for: changed, directory: folder))
         request.recordingAction = "summarize"
         #expect(!ASRTaskSelection.needsModel(for: request, directory: folder))
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("asr-transcript.json"))
+        request.recordingAction = "format"
+        #expect(!ASRTaskSelection.needsModel(for: request, directory: folder))
         request.sourceKind = .bilibili; request.useWhisper = false
         #expect(!ASRTaskSelection.needsModel(for: request, directory: folder))
     }

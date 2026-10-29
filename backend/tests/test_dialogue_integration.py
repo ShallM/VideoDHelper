@@ -92,6 +92,7 @@ class DialogueIntegrationTests(unittest.TestCase):
                 self.assertEqual(config["sourceKind"], "recording")
                 self.assertEqual(config["dialogueStrategy"], strategy)
                 config["beforePublish"]()
+                write_json(folder / "dialogue-results.json", {"formatting": {"status": "not_requested"}})
                 return notes, self.condensed
             with patch.dict("sys.modules", {"meeting_reader": types.SimpleNamespace(summarize=summarize)}):
                 run_recording(request, self.record, self.folder, self.root, lambda *a: None,
@@ -101,6 +102,27 @@ class DialogueIntegrationTests(unittest.TestCase):
             self.assertIn("明确行动与前提", (self.folder / "study-notes.md").read_text())
             self.assertIn("测试通过后再发送", (self.folder / "study-notes.md").read_text())
             self.assertEqual(read_json(self.folder / "transcript.json"), self.segments)
+
+    def test_format_action_uses_current_cloud_settings_without_rerunning_summary_or_asr(self):
+        request = {**self.request, "dialogueStrategy": "meeting-v3", "recordingAction": "format"}
+        write_json(self.folder / "request.json", request)
+        def formatting(segments, title, config, folder, emit):
+            self.assertEqual(config["reasoningEffort"], "high")
+            self.assertEqual(config["model"], "selected-cloud-model")
+            self.assertEqual(config["pricing"], {"inputPerMillion": 2})
+            config["beforePublish"]()
+            write_json(folder / "dialogue-results.json", {"formatting": {"status": "failed", "message": "纪要保留，标点失败。"}})
+            return self.notes, self.condensed
+        with patch("meeting_reader.format_dialogue", side_effect=formatting) as format_call, \
+             patch("meeting_reader.summarize") as summary_call, patch("recording.prepare_transcript") as transcribe:
+            run_recording(request, self.record, self.folder, self.root, lambda *a: None,
+                          lambda *a: {"model": "selected-cloud-model", "reasoningEffort": "high", "pricing": {"inputPerMillion": 2}})
+        self.assertEqual(format_call.call_count, 1)
+        summary_call.assert_not_called(); transcribe.assert_not_called()
+        job = read_json(self.folder / "job.json")
+        self.assertEqual(job["state"], "completed")
+        self.assertEqual(job["message"], "纪要保留，标点失败。")
+        self.assertTrue((self.folder / "study-notes.md").exists())
 
 
 if __name__ == "__main__":

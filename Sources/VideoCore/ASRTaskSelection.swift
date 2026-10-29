@@ -30,7 +30,7 @@ public enum ASRTaskSelection {
 
     public static func needsModel(for request: ProcessingRequest, directory: URL) -> Bool {
         if request.sourceKind == .recording {
-            return request.recordingAction != "summarize"
+            return !["summarize", "format"].contains(request.recordingAction ?? "transcribe")
                 && !FileManager.default.fileExists(atPath: directory.appendingPathComponent("asr-transcript.json").path)
         }
         return request.useWhisper

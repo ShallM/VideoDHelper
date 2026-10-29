@@ -10,7 +10,7 @@ from common import UserError, read_json, write_json
 from dialogue_context import build_context
 from dialogue_reader import Reader
 from meeting_contract import validate_item, validate_document, punctuation_rows, render_item, anchor, REREAD_PROMPT
-from meeting_reader import MeetingReader, compact_evidence
+from meeting_reader import MeetingReader, compact_evidence, format_dialogue
 from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted
 from worker import validate_request
 
@@ -67,9 +67,9 @@ class MeetingTests(unittest.TestCase):
         if phase in ("meeting_draft", "meeting_merge"):
             value = document(units or self.engine.units)
         elif phase == "meeting_evidence":
-            value = {"items": [item(u) for u in units], "coverage": [{"unit": i, "disposition": "substantive"} for i in payload["owned_units"]]}
+            value = {"items": [{"text": u["text"], "evidence": item(u)["evidence"]} for u in units]}
         elif phase == "meeting_review":
-            value = empty_review(payload["owned_checks"], payload["owned_targets"])
+            value = {"patches": [], "additions": [], "issues": [], "unhandled_errors": []}
         elif phase == "meeting_reread":
             value = {**empty_review(), "status": "unresolved", "reason": "没有新增证据"}
         elif phase == "meeting_punctuation":
@@ -100,9 +100,11 @@ class MeetingTests(unittest.TestCase):
         inventory = next(p for phase, p, _ in self.requests if phase == "meeting_evidence")
         self.assertEqual(set(inventory), {"title", "sources", "owned_units", "context"})
         self.assertNotIn("targets", inventory)
-        self.assertEqual([p for p, _, _ in self.requests], ["meeting_draft", "meeting_evidence", "meeting_review", "meeting_punctuation"])
+        self.assertEqual([p for p, _, _ in self.requests], ["meeting_draft", "meeting_evidence", "meeting_review"])
         self.assertEqual("".join(r["text"] for r in rows), "".join(s["text"] for s in transcript()))
-        self.assertEqual(notes["assessmentCount"], 1)
+        self.assertEqual(notes["assessmentCount"], 0)
+        self.assertEqual(engine.review_responsibility[0]["checkIDs"], sorted(engine.checks))
+        self.assertEqual(read_json(self.folder / "dialogue-results.json")["formatting"]["status"], "not_requested")
         self.assertEqual(read_json(self.folder / "dialogue-results.json")["schemaVersion"], 2)
         before = len(self.requests)
         _, (again, _) = self.run_reader()
@@ -112,9 +114,143 @@ class MeetingTests(unittest.TestCase):
 
     def test_baseline_does_not_review_but_uses_same_draft_and_readable_dialogue(self):
         _, (notes, _) = self.run_reader(dialogueStrategy="meeting-baseline")
-        self.assertEqual([p for p, _, _ in self.requests], ["meeting_draft", "meeting_punctuation"])
+        self.assertEqual([p for p, _, _ in self.requests], ["meeting_draft"])
         self.assertEqual(notes["summaryStrategy"], "meeting-baseline")
         self.assertEqual(notes["reviewedParagraphs"], 0)
+
+    def test_sparse_statements_keep_exact_sources_and_actions_require_state(self):
+        e = self.reader()
+        sparse = {"text": "资料已经具备。", "evidence": item(e.units[0])["evidence"]}
+        result = validate_item(copy.deepcopy(sparse), e.lookup)
+        self.assertEqual(result["state"], "not_applicable")
+        self.assertEqual(result["speaker"], "none")
+        self.assertIsNone(result["owner"])
+        self.assertEqual(render_item(result), sparse["text"])
+        sent = compact_evidence(result)
+        self.assertNotIn("owner", sent)
+        self.assertNotIn("conditions", sent)
+        self.assertEqual(validate_item(sent, e.lookup), result)
+        with self.assertRaises(ValueError): validate_item(copy.deepcopy(sparse), e.lookup, action=True)
+        with self.assertRaises(ValueError): validate_item({**copy.deepcopy(sparse), "kind": "proposal"}, e.lookup)
+        action = validate_item({**copy.deepcopy(sparse), "state": "uncertain"}, e.lookup, action=True)
+        self.assertEqual(action["kind"], "action")
+        self.assertIsNone(action["due"])
+        with self.assertRaises(ValueError):
+            validate_item({**copy.deepcopy(sparse), "speaker": "A", "attribution_parts": [0]}, e.lookup)
+
+    def test_full_source_review_doubt_stays_visible_without_repeating_same_context(self):
+        def issue(client, body, phase, payload):
+            if phase == "meeting_review":
+                return self.envelope({"patches": [], "additions": [], "issues": [{"target_id": "claim-0",
+                    "field": "scope", "kind": "scope", "question": "资料适用范围未确定。", "u": [0],
+                    "query": "资料", "status": "unresolved"}]})
+        self.hook = issue
+        e, (notes, _) = self.run_reader()
+        self.assertEqual(e.skipped_rereads, 1)
+        self.assertEqual(e.reread_count, 0)
+        self.assertEqual(len(notes["uncertainties"]), 1)
+        self.assertEqual(notes["uncertainties"][0]["status"], "unresolved")
+        self.assertEqual(next(iter(e.issue_context.values())), {u["id"] for u in e.units})
+        self.assertNotIn("meeting_reread", [p for p, _, _ in self.requests])
+
+    def test_partial_review_can_read_additional_distant_source_once(self):
+        segments = [{"id": i, "start": i * 30., "end": i * 30. + 2,
+                     "text": "尾部新证据。" if i == 3 else "资料已具备。", "speaker": "B"} for i in range(4)]
+        e = self.reader(segments)
+        d = document(e.units); validate_document(d, e.units); e.identify(d)
+        p = empty_review()
+        p["issues"] = [{"target_id": "claim-0", "field": "scope", "kind": "scope", "question": "资料的范围？",
+                        "u": [0], "query": "尾部新证据", "status": "unresolved"}]
+        e.apply_repair(p, "review")
+        e.issue_context[next(iter(e.issues))] = {0, 1}
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            e.reread(); e.reread()
+        self.assertEqual(e.reread_count, 1)
+        self.assertIn("[u3]", self.requests[0][1]["sources"])
+        self.assertEqual(e.skipped_rereads, 0)
+
+    def format_saved(self, **config):
+        value = {**self.config, "dialogueStrategy": "meeting-v3", "sourceRevision": self.engine.source_revision, **config}
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            return format_dialogue(transcript(), "合成录音", value, self.folder, lambda *a: None)
+
+    def test_optional_formatting_only_calls_punctuation_and_preserves_notes_and_summary_diagnostics(self):
+        _, (notes, _) = self.run_reader()
+        summary_before = (self.folder / "summary-run.json").read_bytes()
+        notes_before = (self.folder / "notes.json").read_bytes()
+        self.requests.clear()
+        formatted_notes, rows = self.format_saved()
+        self.assertEqual([p for p, _, _ in self.requests], ["meeting_punctuation"])
+        self.assertEqual(formatted_notes, notes)
+        self.assertEqual((self.folder / "notes.json").read_bytes(), notes_before)
+        self.assertEqual((self.folder / "summary-run.json").read_bytes(), summary_before)
+        self.assertEqual("".join(r["text"] for r in rows), "".join(s["text"] for s in transcript()))
+        bundle = read_json(self.folder / "dialogue-results.json")
+        self.assertEqual(bundle["notes"], notes)
+        self.assertEqual(bundle["formatting"]["status"], "completed")
+        before = len(self.requests)
+        self.format_saved()
+        self.assertEqual(len(self.requests), before)
+        self.assertEqual(read_json(self.folder / "formatting-run.json")["checkpointHits"], 1)
+
+    def test_formatting_failure_and_cancel_preserve_published_products(self):
+        _, (notes, rows) = self.run_reader()
+        self.requests.clear()
+        def fail(client, body, phase, payload):
+            if phase == "meeting_punctuation": raise UserError("合成网络故障")
+        self.hook = fail
+        self.assertEqual(self.format_saved(), (notes, rows))
+        result = read_json(self.folder / "dialogue-results.json")
+        self.assertEqual(result["formatting"]["status"], "failed")
+        self.assertEqual(result["notes"], notes)
+        self.assertEqual(result["condensed"], rows)
+        def cancel(client, body, phase, payload):
+            if phase == "meeting_punctuation": raise KeyboardInterrupt()
+        self.hook = cancel
+        with self.assertRaises(KeyboardInterrupt): self.format_saved()
+        self.assertEqual(read_json(self.folder / "dialogue-results.json")["formatting"]["status"], "cancelled")
+        self.hook = None
+        self.format_saved()
+        self.assertTrue(all(p == "meeting_punctuation" for p, _, _ in self.requests))
+        self.assertEqual(read_json(self.folder / "dialogue-results.json")["notes"], notes)
+
+    def test_formatting_rejects_stale_inputs_before_requests_and_changed_generation_at_publication(self):
+        self.run_reader()
+        saved = (self.folder / "dialogue-results.json").read_bytes()
+        self.requests.clear()
+        for config in ({"sourceRevision": "changed"}, {"recordingRevision": "changed"}, {"dialogueStrategy": "meeting-baseline"}):
+            with self.assertRaises(UserError): self.format_saved(**config)
+        self.assertEqual(self.requests, [])
+        self.assertEqual((self.folder / "dialogue-results.json").read_bytes(), saved)
+        def changed():
+            raise UserError("原稿在处理中变化")
+        with self.assertRaises(UserError): self.format_saved(beforePublish=changed)
+        self.assertEqual((self.folder / "dialogue-results.json").read_bytes(), saved)
+        replacement = {**read_json(self.folder / "dialogue-results.json"), "generationID": "another-generation"}
+        def replaced(): write_json(self.folder / "dialogue-results.json", replacement)
+        with self.assertRaises(UserError): self.format_saved(beforePublish=replaced)
+        self.assertEqual(read_json(self.folder / "dialogue-results.json"), replacement)
+
+    def test_formatting_cancel_resumes_only_unfinished_batch(self):
+        segments = [{"id": i, "start": i * 30., "end": i * 30. + 2,
+                     "text": "资料已具备。", "speaker": "B"} for i in range(2)]
+        e = self.reader(segments)
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            e.run()
+        notes = read_json(self.folder / "dialogue-results.json")["notes"]
+        config = {**self.config, "dialogueStrategy": "meeting-v3", "sourceRevision": e.source_revision}
+        self.requests.clear()
+        def stop_second(client, body, phase, payload):
+            if phase == "meeting_punctuation" and payload["owned_parts"] == [1]: raise KeyboardInterrupt()
+        self.hook = stop_second
+        with patch("meeting_reader.PART_BUDGET", 1), patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            with self.assertRaises(KeyboardInterrupt):
+                format_dialogue(segments, "合成录音", config, self.folder, lambda *a: None)
+            self.hook = None; self.requests.clear()
+            format_dialogue(segments, "合成录音", config, self.folder, lambda *a: None)
+        self.assertEqual([(phase, p["owned_parts"]) for phase, p, _ in self.requests], [("meeting_punctuation", [1])])
+        self.assertEqual(read_json(self.folder / "formatting-run.json")["checkpointHits"], 1)
+        self.assertEqual(read_json(self.folder / "dialogue-results.json")["notes"], notes)
 
     def test_failed_product_is_retained_for_diagnosis_without_reasoning(self):
         def malformed(client, body, phase, payload):
@@ -419,7 +555,7 @@ class MeetingTests(unittest.TestCase):
             e.identify(e.draft(e.units)); e.inventory(e.units); e.review_range(e.units)
         self.assertEqual(e.route, "hierarchical")
         self.assertEqual([c["u"][0] for ch in e.document["chapters"] for c in ch["claims"]], list(range(8)))
-        self.assertEqual([c["unit"] for c in e.source_coverage], list(range(8)))
+        self.assertEqual([u for c in e.source_coverage for u in c["ownedUnits"]], list(range(8)))
         self.assertEqual(e.reviewed, set(range(8)))
         self.assertEqual(len(e.assessments), 8)
         self.assertEqual(e.review_batches, 4)
@@ -528,7 +664,7 @@ class MeetingTests(unittest.TestCase):
         self.assertFalse((self.folder / "dialogue-results.json").exists())
         previous = len(self.requests); self.hook = None
         _, _ = self.run_reader()
-        self.assertEqual([p for p, _, _ in self.requests[previous:]], ["meeting_review", "meeting_punctuation"])
+        self.assertEqual([p for p, _, _ in self.requests[previous:]], ["meeting_review"])
 
     def test_long_review_keeps_distant_source_without_importing_unrelated_claims(self):
         segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
@@ -577,6 +713,9 @@ class MeetingTests(unittest.TestCase):
         for strategy in ("meeting-v3", "meeting-baseline", "context-v2", "legacy"):
             validate_request({"sourceKind": "recording", "title": "测试", "dialogueStrategy": strategy})
         with self.assertRaises(UserError): validate_request({"sourceKind": "recording", "title": "测试", "dialogueStrategy": "typo"})
+        validate_request({"sourceKind": "recording", "title": "测试", "dialogueStrategy": "meeting-v3", "recordingAction": "format"})
+        with self.assertRaises(UserError):
+            validate_request({"sourceKind": "recording", "title": "测试", "dialogueStrategy": "legacy", "recordingAction": "format"})
 
 
 if __name__ == "__main__":

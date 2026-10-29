@@ -526,6 +526,22 @@ struct WorkspacePage: View {
                         }
                     } else if model.selectedTab == 1 {
                         if model.condensed.isEmpty { pendingText }
+                        if model.isRecording && model.notes?.isMeeting == true {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Label("阅读排版", systemImage: "text.alignleft").font(.headline)
+                                    Spacer()
+                                    Button(model.dialogueFormatting?.status == "failed" || model.dialogueFormatting?.status == "cancelled" ? "继续优化断句与标点" : "优化断句与标点") {
+                                        model.formatRecording()
+                                    }.disabled(!model.canFormatRecording || otherIsBusy)
+                                }
+                                Text(model.dialogueFormatting?.message ?? "已有整理稿保持可用；可单独优化断句与标点。")
+                                if model.dialogueFormatting?.isComplete != true {
+                                    Text("可选操作：使用当前大语言模型并计入用量，只调整阅读行和标点，保留原话与归属。纪要可直接阅读和导出。")
+                                }
+                            }.font(.caption).foregroundStyle(.secondary).padding(14)
+                                .background(Color.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                        }
                         if model.isRecording && model.condensed.contains(where: { $0.parts?.contains(where: { $0.speaker == "unknown" }) == true }) {
                             Text("“归属未确定”只标记局部片段，不代表第三位说话人；可按时间回听原话。")
                                 .font(.caption).foregroundStyle(.secondary)

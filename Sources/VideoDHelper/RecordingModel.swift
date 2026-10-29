@@ -7,6 +7,7 @@ extension WorkspaceModel {
     var isRecording: Bool { workspace == .recording }
     var summaryStale: Bool { isRecording && notes != nil && (notes?.recordingRevision ?? "original") != editsRevision }
     var canSummarizeRecording: Bool { isRecording && !isBusy && !segments.isEmpty && currentJob != nil && !currentJobIsArchived && recordingEditsValid }
+    var canFormatRecording: Bool { canSummarizeRecording && notes?.isMeeting == true && !summaryStale && dialogueFormatting?.isComplete != true }
     var canTranscribeRecording: Bool { isRecording && !isBusy && recordingURL != nil && !currentJobIsArchived && editsRevision == "original" && recordingAction == "transcribe" && currentJob?.state != "transcribed" && currentJob?.state != "completed" }
     var dialogueStrategyLabel: String { DialogueStrategy.label(for: dialogueStrategy) }
 
@@ -68,7 +69,7 @@ extension WorkspaceModel {
             self.currentJob = job; self.recordingAction = "transcribe"
             self.dialogueStrategy = request.effectiveDialogueStrategy
             self.whisperModel = selectedModel
-            self.metadata = nil; self.link = ""; self.segments = []; self.condensed = []; self.notes = nil
+            self.metadata = nil; self.link = ""; self.segments = []; self.condensed = []; self.notes = nil; self.dialogueFormatting = nil
             self.title = job.title; self.source = job.source; self.recordingURL = destination; self.recordingDuration = duration
             self.editsRevision = "original"; self.recordingEditsValid = true
             self.speakerNames = ["A": "说话人 A", "B": "说话人 B"]
@@ -99,6 +100,17 @@ extension WorkspaceModel {
             self.recordingAction = "summarize"
             try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
             try await self.run(job)
+        }
+    }
+    func formatRecording() {
+        guard let job = currentJob, canFormatRecording else { return }
+        start(status: "正在单独优化断句与标点；纪要已保存…") {
+            var request = try AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json"))
+            request.recordingAction = "format"
+            self.recordingAction = "format"
+            try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
+            try await self.run(job)
+            self.selectedTab = 1
         }
     }
     func compareRecording(strategy: DialogueStrategy) {
