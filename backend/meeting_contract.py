@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1.5"
+VERSION = "meeting-products-v1.6"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -62,9 +62,9 @@ REVIEW_PROMPT = RULES + ITEM_SCHEMA + """
 "patches":[{"target_id":"给定目标id","action":"replace或remove","replacement":声明或null,"reason":"具体错误及修复依据","check_ids":["核对项id"]}],
 "additions":[{"chapter_id":"已有章节id，行动用actions，无合适主题用supplement","item":声明,"check_ids":["核对项id"],"reason":"遗漏内容"}],
 "issues":[{"target_id":"目标id或核对项id","field":"text/kind/state/conditions/scope/speaker/owner/due/number之一","kind":"omission/unsupported/state/condition/scope/attribution/number/negation/correction/duplicate/audio之一","question":"中性的具体问题","u":[0],"query":"原文检索词或空字符串","status":"unresolved或needs_audio"}]}。
-assessments恰好覆盖owned_checks一次。仅修改owned_targets。replacement为完整声明，不只返回改动字段；概览替换用{"text":"约200字概览","u":[0]}。
+assessments恰好覆盖owned_checks一次。仅修改owned_targets。按target_kind选择replacement：claim/action为完整声明，overview用{"text":"约200字概览","u":[0]}，uncertainty用{"text":"仍待确认的问题","u":[0],"status":"unresolved或needs_audio"}。不要给uncertainty返回声明的kind/state/evidence结构，也不能省略u或status。
 只有明确实质错误才修订，不做文风润色。不能删除概览。conditions/scope/state变化必须在reason解释原证据及新解释。新声明同样需要逐字证据。
-不确定的事实不能写成肯定结论；原文无法确定时登记一个疑点。真正听不清用needs_audio。相同目标的相同字段只登记一个问题，不用换措辞重复提问。
+不确定的事实不能写成肯定结论；原文无法确定时登记一个疑点。真正听不清用needs_audio。已有needs_audio目标不能删除或改为unresolved，关联issues也必须needs_audio，不能安排文字回读冒充听音。相同目标的相同字段只登记一个问题，不用换措辞重复提问。
 每批最多30个补丁、30个补充和12个疑点；超出时在unhandled_errors中列出剩余问题，不能假装检查完成。没有剩余问题则unhandled_errors为空数组。
 """
 
@@ -73,7 +73,8 @@ REREAD_PROMPT = RULES + ITEM_SCHEMA + """
 返回{"status":"resolved/unresolved/needs_audio之一","reason":"实际证据或未能解决的原因",
 "patches":[{"target_id":"给定目标id","action":"replace或remove","replacement":完整声明或null,"reason":"修订理由","check_ids":[]}],
 "additions":[],"assessments":[],"issues":[],"unhandled_errors":[]}。
-概览替换仍用{"text":"概览","u":[0]}。没有证据增益则不提交补丁。需要听音不能仅凭文字关闭。已准确表达的问题可以resolved且不修改正文，但须附evidence:[{"unit":0,"first_part":0,"last_part":2}]。
+按target_kind选择replacement：claim/action为完整声明，overview用{"text":"概览","u":[0]}，uncertainty用{"text":"仍待确认的问题","u":[0],"status":"unresolved或needs_audio"}。uncertainty不是声明，不能返回kind/state等声明结构代替u/status。
+没有证据增益则不提交补丁。需要听音不能仅凭文字关闭，也不能删除或降低原有needs_audio标记。文字已能解决的疑点可返回status=resolved、patches为空，并在顶层附evidence:[{"unit":0,"first_part":0,"last_part":2}]；不要把已解决的答案写成新的待确认事项。程序会收起该已解决问题，保留处理依据。
 """
 
 PUNCTUATE_PROMPT = RULES + """

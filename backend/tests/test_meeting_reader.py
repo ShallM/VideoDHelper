@@ -9,7 +9,7 @@ from unittest.mock import patch
 from common import UserError, read_json, write_json
 from dialogue_context import build_context
 from dialogue_reader import Reader
-from meeting_contract import validate_item, validate_document, punctuation_rows, render_item, anchor
+from meeting_contract import validate_item, validate_document, punctuation_rows, render_item, anchor, REREAD_PROMPT
 from meeting_reader import MeetingReader, compact_evidence
 from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted
 from worker import validate_request
@@ -292,6 +292,62 @@ class MeetingTests(unittest.TestCase):
         e = self.prepared(); p = empty_review()
         p["issues"] = [{"target_id": "claim-0", "field": "text", "kind": "audio", "question": "回听", "u": [0], "query": "", "status": "needs_audio"}]
         e.apply_repair(p, "review"); e.reread(); self.assertEqual(e.reread_count, 0)
+
+    def test_uncertainty_repair_feedback_names_its_actual_schema(self):
+        e = self.prepared()
+        e.document["uncertainties"] = [{"id": "uncertainty-0", "text": "是否已有资料？", "u": [0], "status": "unresolved"}]
+        targets = e.meeting_targets()
+        valid = {**empty_review(), "status": "unresolved", "reason": "保留待确认范围"}
+        valid["patches"] = [{"target_id": "uncertainty-0", "action": "replace", "check_ids": [], "reason": "限定问题范围",
+                             "replacement": {"text": "资料是否完整？", "u": [0], "status": "unresolved"}}]
+        def malformed_first(client, body, phase, payload):
+            value = copy.deepcopy(valid)
+            if len(self.requests) == 1:
+                value["patches"][0]["replacement"] = item(e.units[0])
+            return self.envelope(value)
+        self.hook = malformed_first
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            value = e.call(REREAD_PROMPT, {"sources": "合成测试"},
+                lambda v: e.validate_repair(v, e.units, targets, {"uncertainty-0"}, {}, reread=True), "meeting_reread")
+        self.assertEqual(len(self.requests), 2)
+        feedback = self.requests[1][2]["messages"][0]["content"]
+        self.assertIn("uncertainty-0的target_kind=uncertainty", feedback)
+        self.assertIn('"status":"unresolved或needs_audio"', feedback)
+        self.assertEqual(value["patches"][0]["replacement"], valid["patches"][0]["replacement"])
+        self.assertEqual(e.document["uncertainties"][0]["text"], "是否已有资料？")
+
+    def test_audio_uncertainty_cannot_be_removed_scheduled_for_text_or_resolved(self):
+        e = self.prepared()
+        e.document["uncertainties"] = [{"id": "uncertainty-0", "text": "听不清专名。", "u": [0], "status": "needs_audio"}]
+        targets = e.meeting_targets()
+        remove = empty_review()
+        remove["patches"] = [{"target_id": "uncertainty-0", "action": "remove", "replacement": None, "reason": "猜测已解决", "check_ids": []}]
+        with self.assertRaisesRegex(ValueError, "需回听"):
+            e.validate_repair(remove, e.units, targets, {"uncertainty-0"}, {})
+        schedule = empty_review()
+        schedule["issues"] = [{"target_id": "uncertainty-0", "field": "text", "kind": "audio", "question": "专名是什么？", "u": [0], "query": "", "status": "unresolved"}]
+        with self.assertRaisesRegex(ValueError, "需回听"):
+            e.validate_repair(schedule, e.units, targets, {"uncertainty-0"}, {})
+        resolved = {**empty_review(), "status": "resolved", "reason": "仅文字猜测", "evidence": [{"unit": 0, "first_part": 0, "last_part": 0}]}
+        with self.assertRaisesRegex(ValueError, "需回听"):
+            e.validate_repair(resolved, e.units, targets, {"uncertainty-0"}, {}, reread=True)
+
+    def test_text_resolution_with_evidence_hides_one_question_and_keeps_audit_source(self):
+        e = self.prepared()
+        question = {"id": "uncertainty-0", "text": "资料是否已经放入目录？", "u": [0], "status": "unresolved"}
+        e.document["uncertainties"] = [copy.deepcopy(question)]
+        proposal = empty_review()
+        proposal["issues"] = [{"target_id": "uncertainty-0", "field": "text", "kind": "state", "question": question["text"], "u": [0], "query": "资料", "status": "unresolved"}]
+        e.apply_repair(proposal, "review")
+        self.hook = lambda *_: self.envelope({**empty_review(), "status": "resolved", "reason": "原话明确资料已经有了", "evidence": [{"unit": 0, "first_part": 0, "last_part": 0}]})
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            e.reread()
+        self.assertEqual(e.reread_count, 1)
+        self.assertEqual(e.outputs()[0]["uncertainties"], [])
+        self.assertEqual(e.document["uncertainties"], [question])
+        proof = e.patch_log[-1]["proposal"]["evidence"][0]
+        self.assertEqual(proof, {"unit": 0, "first_part": 0, "last_part": 0})
+        self.assertEqual(anchor(proof, e.lookup)["quote"], e.units[0]["parts"][0]["text"])
 
     def test_registered_doubts_replace_the_draft_row_without_merging_distinct_fields(self):
         e = self.prepared()
