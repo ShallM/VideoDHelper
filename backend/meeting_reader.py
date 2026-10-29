@@ -148,7 +148,11 @@ class MeetingReader(Reader):
         if depth == 0:
             groups = condensed_batches(units, max_parts=PART_BUDGET)
             if len(groups) > 1:
-                return [row for group in groups for row in self.punctuate(group, 1)]
+                rows = []
+                for index, group in enumerate(groups, 1):
+                    self.emit("condense", f"整理阅读行与标点 · 第 {index}/{len(groups)} 批，保留全部原话…")
+                    rows.extend(self.punctuate(group, 1))
+                return rows
         ids = [p["id"] for u in units for p in u["parts"]]
         context_ids = {u["id"] for u in units}
         neighbours = [u for u in select_context(self.units, sorted(context_ids)) if u["id"] not in context_ids]
