@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1.1"
+VERSION = "meeting-products-v1.2"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -31,6 +31,7 @@ ITEM_SCHEMA = """每个声明/证据条目使用相同结构：
 "speaker":"A/B/unknown/none之一","attribution_parts":[0],
 "owner":null,"due":null,"evidence":[{"unit":0,"first_part":0,"last_part":2}]}。
 speaker=none仅用于不向某位说话人归属的中性概括。speaker=A或B时，attribution_parts必须列出引文内支持归属且标记为同一人的part编号；其他情况为空数组。不能用相邻片段猜人。
+attribution_parts只需选择1至3个直接支撑归属的片段，不要复制整个evidence区间。逐个核对来源标签：例如[part17:unknown]绝不能填入speaker=B的attribution_parts；证据范围可以包含unknown，但它不是B的归属证据。无法确定归属时保留unknown或作中性概括，不强行指定A/B。
 owner仅action条目可填A或B，无法确认则null；due仅有明确承诺期限时填原文表达，否则null。conditions用于动作前提，scope用于适用范围，不能只把限制藏在引文里。
 state=not_applicable用于没有完成状态的问题/观点等，不强行把所有话语转成待办。待执行建议仍是proposal，不伪装成已确认action。
 """
@@ -161,8 +162,15 @@ def validate_item(item, units, *, action=False):
     if speaker not in ("A", "B", "unknown", "none") or not isinstance(attributed, list):
         raise ValueError("speaker或attribution_parts无效")
     if speaker in ("A", "B"):
-        if (not attributed or any(type(i) is not int or i not in evidence_parts or all_parts[i]["speaker"] != speaker for i in attributed)):
-            raise ValueError("明确归属必须引用引文内具有同一speaker的part；unknown不能自动分给A/B")
+        invalid = [i for i in attributed if type(i) is not int or i not in evidence_parts or all_parts[i]["speaker"] != speaker]
+        if not attributed or invalid:
+            details = []
+            for i in invalid[:6]:
+                label = all_parts[i]["speaker"] if type(i) is int and i in all_parts else "不存在"
+                details.append(f"{i}:{label}" + ("(不在引文内)" if type(i) is not int or i not in evidence_parts else ""))
+            raise ValueError(f"声明「{item['text'][:40]}」speaker={speaker}的attribution_parts无效："
+                             + (",".join(details) if details else "缺少归属片段")
+                             + "。只引用引文内同标签片段；不能把unknown或另一人归给该人。不确定时用unknown/none。")
     elif attributed:
         raise ValueError("未知或中性归属的attribution_parts必须为空")
     sources = [units[i]["text"] for i in item["u"]]

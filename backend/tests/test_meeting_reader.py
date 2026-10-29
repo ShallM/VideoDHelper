@@ -139,7 +139,10 @@ class MeetingTests(unittest.TestCase):
         bad = copy.deepcopy(claim); bad["speaker"] = "A"
         with self.assertRaises(ValueError): validate_item(bad, e.lookup)
         bad = item(e.units[0], "不", speaker="A", attribution_parts=[2])
-        with self.assertRaises(ValueError): validate_item(bad, e.lookup)
+        with self.assertRaisesRegex(ValueError, r"speaker=A.*2:unknown"):
+            validate_item(bad, e.lookup)
+        self.assertEqual(bad["speaker"], "A")  # Rejected, never silently reassigned.
+        self.assertEqual(bad["attribution_parts"], [2])
 
     def test_evidence_parts_take_exact_source_without_model_retyping_or_guessing(self):
         e = self.reader()

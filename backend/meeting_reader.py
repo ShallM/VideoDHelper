@@ -14,8 +14,8 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
     validate_item, punctuation_rows, render_item, string, anchor)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 
-VERSION = "meeting-reader-v3.3"
-PROMPT_VERSION = "meeting-prompts-v1.1"
+VERSION = "meeting-reader-v3.4"
+PROMPT_VERSION = "meeting-prompts-v1.2"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
 
