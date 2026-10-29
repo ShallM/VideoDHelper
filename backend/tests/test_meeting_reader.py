@@ -322,6 +322,32 @@ class MeetingTests(unittest.TestCase):
         # The overview still references the complete context it summarizes.
         self.assertEqual(e.cited(e.document["overview"], statement=False)["source_ids"], [0, 1, 2, 3])
 
+    def test_withdrawn_proposal_patch_keeps_history_and_both_source_positions(self):
+        segments = [
+            {"id": 0, "start": 0., "end": 2., "text": "建议明天交付。", "speaker": "A"},
+            {"id": 1, "start": 2., "end": 4., "text": "我不同意，测试尚未通过。", "speaker": "B"},
+            {"id": 2, "start": 4., "end": 6., "text": "那收回明天交付的提议，时间另议。", "speaker": "A"}]
+        e = self.reader(segments)
+        d = document(e.units)
+        d["chapters"][0]["claims"][0] = item(e.units[0], text="建议明天交付。", kind="proposal", state="pending")
+        validate_document(d, e.units); e.identify(d)
+        before = copy.deepcopy(e.document)
+        replacement = item(e.units[0], text="曾建议明天交付，随后收回；时间另议。", kind="proposal", state="withdrawn",
+                           attribution_parts=[0, 2], evidence=[{"unit": 0, "first_part": 0, "last_part": 0},
+                                                               {"unit": 0, "first_part": 2, "last_part": 2}])
+        repair = empty_review()
+        repair["patches"] = [{"target_id": "claim-0", "action": "replace", "replacement": replacement,
+                               "reason": "发起人在后文明确撤回，保留提议与变化过程。", "check_ids": []}]
+        e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), {})
+        e.apply_repair(repair, "review")
+        claim = e.document["chapters"][0]["claims"][0]
+        self.assertEqual(e.patch_log[0]["before"], before)
+        self.assertEqual(claim["id"], "claim-0")
+        self.assertEqual(e.cited(claim)["source_ids"], [0, 2])
+        self.assertIn("已撤回", e.cited(claim)["text"])
+        self.assertNotIn("待完成", e.cited(claim)["text"])
+        self.assertEqual(e.document["action_items"], [])
+
     def test_cross_range_correction_does_not_reassign_claim_to_another_review_batch(self):
         segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
                      "text": f"第{i}项资料已具备。", "speaker": "B"} for i in range(4)]

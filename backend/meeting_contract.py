@@ -48,6 +48,7 @@ overview与每项uncertainties的u各选1至12处最相关单元，不罗列全�
 EVIDENCE_PROMPT = RULES + ITEM_SCHEMA + """
 本次只读原文，不提供也不要猜测任何摘要草稿。列出影响理解或执行的重要核对项：核心观点、问答结论、现有资源、待交付承诺、动作、条件/范围、否定、数字以及后续更正。
 每项表达一个可独立核对的事实或关系，保留状态和限制；别把模糊词解释成确定含义。只负责owned_units，其他context仅解释前后关联。
+同一事项有前后变化时，提取变化关系及最终有效状态，同时引用原说法与后续回应/更正；不要把每句话孤立为互不相关的事实。发起人明确收回或改为不执行的早期提议不能仍为pending；仅另一方反对而发起人未表态时，保留分歧，不擅自认定撤回或双方决定。无法确定最终状态用uncertain并说明限制。
 返回{"items":[证据条目],"coverage":[{"unit":0,"disposition":"substantive或incidental"}]}。
 coverage恰好列出每个owned_units一次：substantive单元至少被一个items引文覆盖；纯语气/重复/过渡可incidental。此覆盖表只记录阅读范围，不表示摘要零遗漏。
 不要为满足数量扩写或复制每句口头语。重要事实不能因为出现在收尾或很短的应答中被忽略。
@@ -56,6 +57,7 @@ coverage恰好列出每个owned_units一次：substantive单元至少被一个it
 REVIEW_PROMPT = RULES + ITEM_SCHEMA + """
 对照sources原文、独立核对清单checks和草稿targets，核验本次owned_checks与owned_targets。先根据原文确认清单本身，再检查摘要；不能盲信清单或草稿。
 分别查：重要遗漏、无依据陈述、条件/范围丢失、状态改变、数字或否定错误、错误归属、重复。尤其检查补丁会不会把原本正确的内容改坏。
+还要把同一事项的相关targets与checks放在一起按原文先后核对：较晚的明确撤回、更正、否定或条件回应，是否改变早先条目的最终状态。不能因为早先原句存在就把过时的pending认作covered；也不能仅凭另一人的反对认定发起人已撤回。正文、状态标签和行动列表必须一致，不得一处写不执行、另一处仍当作待完成任务。必要时修改早期条目，保留变化过程及两处证据；不是把矛盾两边分别照抄就算核验完成。
 返回{"assessments":[{"check_id":"给定的核对项id","status":"covered/omitted/uncertain/invalid之一","target_ids":["相关声明id"],"reason":"证据判断"}],
 "patches":[{"target_id":"给定目标id","action":"replace或remove","replacement":声明或null,"reason":"具体错误及修复依据","check_ids":["核对项id"]}],
 "additions":[{"chapter_id":"已有章节id，行动用actions，无合适主题用supplement","item":声明,"check_ids":["核对项id"],"reason":"遗漏内容"}],
