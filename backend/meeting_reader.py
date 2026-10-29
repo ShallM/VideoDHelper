@@ -11,13 +11,14 @@ from dialogue_context import source_text, select_context
 from dialogue_reader import Reader, condensed_batches, citations, validate_reader_text
 from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, DRAFT_PROMPT,
     EVIDENCE_PROMPT, REVIEW_PROMPT, REREAD_PROMPT, PUNCTUATE_PROMPT, validate_document,
-    validate_item, punctuation_rows, render_item, string, anchor)
+    validate_item, validate_items, punctuation_rows, render_item, string, anchor)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit
 
-VERSION = "meeting-reader-v3.5"
+VERSION = "meeting-reader-v3.6"
 PROMPT_VERSION = "meeting-prompts-v1.3"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
+VALIDATION_FEEDBACK_CHARS = 1600
 
 
 def compact_evidence(value):
@@ -50,9 +51,11 @@ class MeetingReader(Reader):
             raise UserError("未知会议纪要流程")
         self.identity = digest({"base": self.identity, "strategy": self.strategy, "version": VERSION,
             "contract": CONTRACT_VERSION, "promptVersion": PROMPT_VERSION, "partBudget": PART_BUDGET,
+            "validationFeedbackChars": VALIDATION_FEEDBACK_CHARS,
             "maxRereads": self.max_rereads,
             "prompts": [DRAFT_PROMPT, EVIDENCE_PROMPT, REVIEW_PROMPT, REREAD_PROMPT, PUNCTUATE_PROMPT]})
         self.config["summaryVersion"] = VERSION
+        self.config["validationFeedbackChars"] = VALIDATION_FEEDBACK_CHARS
         self.client = ChatClient(self.config, self.folder / "checkpoints" / "meeting-v3" / self.identity, emit)
         self.checks, self.assessments, self.retrieval_cache = {}, {}, {}
         self.retrieval_hits = self.duplicate_issues = self.no_progress = 0
@@ -70,7 +73,7 @@ class MeetingReader(Reader):
             except (ValueError, KeyError, TypeError) as error:
                 # Keep only the proposed product, never the model's reasoning
                 # or request credentials. A failed repair must be diagnosable.
-                self.validation_failures.append({"phase": phase, "error": str(error)[:240],
+                self.validation_failures.append({"phase": phase, "error": str(error)[:VALIDATION_FEEDBACK_CHARS],
                                                  "candidate": copy.deepcopy(value)})
                 self.validation_failure_count += 1
                 self.validation_failures = self.validation_failures[-12:]
@@ -112,8 +115,9 @@ class MeetingReader(Reader):
         def validate(value):
             if not isinstance(value.get("items"), list) or len(value["items"]) > 600:
                 raise ValueError("items须为有限关键事实列表")
+            validate_items(((f"items[{i}]", item, item.get("kind") == "action") for i, item in enumerate(value["items"])),
+                           {u["id"]: u for u in source_units})
             for item in value["items"]:
-                validate_item(item, {u["id"]: u for u in source_units}, action=item.get("kind") == "action")
                 if not ids.intersection(item["u"]):
                     raise ValueError("核对项必须涉及本批owned_units，不能只复述邻接背景")
             coverage = value.get("coverage")

@@ -226,7 +226,9 @@ class ChatClient:
                 return value
             except (ValueError, KeyError, TypeError) as error:
                 # Only our structural validator messages; never reflect arbitrary API bodies.
-                feedback = (" 检查提示：" + str(error)[:240]) if self.config.get("summaryVersion") else ""
+                feedback_limit = self.config.get("validationFeedbackChars", 240)
+                feedback_limit = min(1600, max(240, feedback_limit)) if type(feedback_limit) is int else 240
+                feedback = (" 检查提示：" + str(error)[:feedback_limit]) if self.config.get("summaryVersion") else ""
                 if validation_attempt:
                     raise ValueError("模型结构或来源检查未通过") from None
 

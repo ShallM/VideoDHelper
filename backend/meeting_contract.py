@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1.2"
+VERSION = "meeting-products-v1.3"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -129,6 +129,25 @@ def anchor(proof, units):
     return {"unit": proof["unit"], "quote": quote, "start": start, "end": start + len(quote), "parts": parts}
 
 
+class AttributionError(ValueError):
+    """A valid source span contains an invalid explicit speaker assignment."""
+    def __init__(self, message, compact):
+        super().__init__(message)
+        self.compact = compact
+
+
+def validate_items(entries, units):
+    """Return several exact repair locations without accepting any bad item."""
+    errors = []
+    for path, item, action in entries:
+        try:
+            validate_item(item, units, action=action)
+        except AttributionError as error:
+            errors.append(f"{path}: {error.compact}")
+    if errors:
+        raise ValueError("归属校验未通过，共" + str(len(errors)) + "处。只选引文内同标签片段，未知不猜人。" + "；".join(errors))
+
+
 def validate_item(item, units, *, action=False):
     if not isinstance(item, dict):
         raise ValueError("声明必须是对象")
@@ -170,9 +189,10 @@ def validate_item(item, units, *, action=False):
             for i in invalid[:6]:
                 label = all_parts[i]["speaker"] if type(i) is int and i in all_parts else "不存在"
                 details.append(f"{i}:{label}" + ("(不在引文内)" if type(i) is not int or i not in evidence_parts else ""))
-            raise ValueError(f"声明「{item['text'][:40]}」speaker={speaker}的attribution_parts无效："
-                             + (",".join(details) if details else "缺少归属片段")
-                             + "。只引用引文内同标签片段；不能把unknown或另一人归给该人。不确定时用unknown/none。")
+            detail = ",".join(details) if details else "缺少归属片段"
+            raise AttributionError(f"声明「{item['text'][:40]}」speaker={speaker}的attribution_parts无效："
+                                   + detail + "。只引用引文内同标签片段；不能把unknown或另一人归给该人。不确定时用unknown/none。",
+                                   f"speaker={speaker}, attribution_parts错误={detail}")
     elif attributed:
         raise ValueError("未知或中性归属的attribution_parts必须为空")
     sources = [units[i]["text"] for i in item["u"]]
@@ -190,18 +210,20 @@ def validate_document(value, units):
     if not isinstance(value["chapters"], list) or not 1 <= len(value["chapters"]) <= 32:
         raise ValueError("纪要需要1至32个实际主题")
     count = 0
-    for chapter in value["chapters"]:
+    entries = []
+    for ci, chapter in enumerate(value["chapters"]):
         string(chapter["title"], maximum=160)
         if not isinstance(chapter["claims"], list) or not chapter["claims"]:
             raise ValueError("每个主题需要实质声明")
-        for item in chapter["claims"]:
-            validate_item(item, units)
+        for ii, item in enumerate(chapter["claims"]):
+            entries.append((f"chapters[{ci}].claims[{ii}]", item, False))
             count += 1
-        validate_reader_text(chapter["title"], [units[i]["text"] for c in chapter["claims"] for i in c["u"]])
     if not isinstance(value["action_items"], list) or len(value["action_items"]) > 100 or count > 500:
         raise ValueError("纪要或行动数量超过安全上限；不要静默截断")
-    for item in value["action_items"]:
-        validate_item(item, units, action=True)
+    entries.extend((f"action_items[{i}]", item, True) for i, item in enumerate(value["action_items"]))
+    validate_items(entries, units)
+    for chapter in value["chapters"]:
+        validate_reader_text(chapter["title"], [units[i]["text"] for c in chapter["claims"] for i in c["u"]])
     if not isinstance(value["uncertainties"], list) or len(value["uncertainties"]) > 60:
         raise ValueError("uncertainties须为有限列表")
     for item in value["uncertainties"]:
