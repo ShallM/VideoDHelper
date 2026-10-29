@@ -225,6 +225,39 @@ class MeetingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             punctuation_rows({"rows": [{"first": 0, "last": 0}], "insertions": [{"part_id": 0, "offset": 1, "text": "，"}]}, first_batch, all_units=split)
 
+    def test_punctuation_text_anchor_is_exact_unique_and_persists_character_offset(self):
+        units = build_context([{**transcript()[0], "text": "嗯🙂 Large-v3 很好，保留  空格", "speaker": "unknown"}])
+        original = units[0]["parts"][0]["text"]
+        base = {"rows": [{"first": 0, "last": 0}], "insertions": []}
+        valid = {"part_id": 0, "after": "Large-v3", "text": "，"}
+        rows = punctuation_rows({**base, "insertions": [valid]}, units)
+        part = rows[0]["parts"][0]
+        self.assertEqual(part["text"], "嗯🙂 Large-v3， 很好，保留  空格")
+        self.assertEqual(part["punctuation_insertions"], [{"offset": 11, "text": "，"}])
+        self.assertEqual(part["speaker"], "unknown")
+        self.assertEqual(units[0]["parts"][0]["text"], original)
+        for invalid in ({**valid, "after": "large-v3"}, {**valid, "after": "保留 空格"},
+                        {**valid, "after": "Large"}, {**valid, "after": ""}, {**valid, "offset": 11}):
+            with self.assertRaises(ValueError):
+                punctuation_rows({**base, "insertions": [invalid]}, units)
+        duplicate = build_context([{**transcript()[0], "text": "哈哈哈"}])
+        with self.assertRaisesRegex(ValueError, "唯一"):
+            punctuation_rows({**base, "insertions": [{"part_id": 0, "after": "哈哈", "text": "。"}]}, duplicate)
+
+    def test_punctuation_anchor_does_not_cross_parts_and_reports_all_bad_positions(self):
+        units = build_context([{**transcript()[0], "text": "2", "speaker": "A"},
+                               {**transcript()[1], "text": ".05好", "speaker": "unknown"}])
+        first = [{**units[0], "parts": units[0]["parts"][:1]}]
+        base = {"rows": [{"first": 0, "last": 0}], "insertions": []}
+        for phrase in ("2", "2.05", ".05"):
+            with self.assertRaises(ValueError):
+                punctuation_rows({**base, "insertions": [{"part_id": 0, "after": phrase, "text": "。"}]}, first, all_units=units)
+        with self.assertRaises(ValueError) as error:
+            punctuation_rows({**base, "insertions": [{"part_id": 0, "offset": 2, "text": "。"},
+                                                     {"part_id": 0, "offset": 3, "text": "，"}]}, first)
+        self.assertIn("insertions[0]", str(error.exception)); self.assertIn("insertions[1]", str(error.exception))
+        self.assertIn("0..1", str(error.exception))
+
     def test_rows_cannot_skip_short_answer_or_reorder_ownership(self):
         units = build_context(transcript())
         for rows in ([{"first": 0, "last": 1}, {"first": 3, "last": 3}], [{"first": 1, "last": 3}, {"first": 0, "last": 0}]):

@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1.4"
+VERSION = "meeting-products-v1.5"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -78,9 +78,9 @@ REREAD_PROMPT = RULES + ITEM_SCHEMA + """
 
 PUNCTUATE_PROMPT = RULES + """
 只安排owned_parts的可读行边界并插入必要标点，不改字、不删字、不纠错、不删口头语，不猜测声音身份。
-返回{"rows":[{"first":0,"last":2}],"insertions":[{"part_id":0,"offset":3,"text":"，"}]}。
+返回{"rows":[{"first":0,"last":2}],"insertions":[{"part_id":0,"after":"该片段中的唯一原文短语","text":"，"}]}。
 rows按顺序完整覆盖owned_parts一次；行可包含多种局部归属，不把每个残字当成新发言。
-offset是该part原始正文的Unicode字符偏移（0为开头，长度为末尾），与传输标签无关。插入位置必须准确，无法确认则不插。
+after必须是所选part正文中只出现一次的连续原字短语，标点插在这段短语之后，由程序计算位置，不要自行数字符或返回offset。短语需逐字保留原文的大小写、空格和标点；重复时可选更长上下文以保证唯一。不能跨part拼接短语，不能使用相邻part的文字，无法确认则不插。
 仅可插入标点，不可插入文字、数字或空格。不要在英文单词、代码标识符或数字中间插入标点，不改变小数和正负号。
 未列出的部分由程序原样复制。不要输出完整改写稿或speaker字段。context仅供理解，不能编辑非owned_parts。
 """
@@ -286,18 +286,41 @@ def punctuation_rows(value, units, *, all_units=None):
     full_text = "".join(p["text"] for p in context_parts)
     if not isinstance(value["insertions"], list) or len(value["insertions"]) > 2000:
         raise ValueError("insertions须为有限标点插入列表")
-    for edit in value["insertions"]:
-        pid, offset, content = edit["part_id"], edit["offset"], edit["text"]
-        if type(pid) is not int or pid not in lookup or type(offset) is not int or not 0 <= offset <= len(lookup[pid]["text"]):
-            raise ValueError("标点偏移必须位于原始part字符范围")
-        if not isinstance(content, str) or not 1 <= len(content) <= 3 or any(c not in PUNCTUATION for c in content):
-            raise ValueError("只能插入至多三个许可标点，不得插入文字、空格或数字")
-        if (pid, offset) in seen:
-            raise ValueError("同一位置的标点只能插入一次")
-        absolute = offsets[pid] + offset
-        if 0 < absolute < len(full_text) and all(c.isascii() and (c.isalnum() or c in "_.+-") for c in full_text[absolute-1:absolute+1]):
-            raise ValueError("不能在数字、英文词或代码标识符中间插标点")
-        seen.add((pid, offset)); inserts.setdefault(pid, []).append((offset, content))
+    errors = []
+    for index, edit in enumerate(value["insertions"]):
+        try:
+            pid, content = edit["part_id"], edit["text"]
+            if type(pid) is not int or pid not in lookup:
+                raise ValueError("part_id必须属于本批owned_parts")
+            original = lookup[pid]["text"]
+            if "after" in edit:
+                if "offset" in edit:
+                    raise ValueError("after与offset只能选择一种定位方式")
+                phrase = edit["after"]
+                if not isinstance(phrase, str) or not phrase:
+                    raise ValueError("after须为非空的原文短语")
+                start = original.find(phrase)
+                if start < 0 or original.find(phrase, start + 1) >= 0:
+                    raise ValueError(f"part {pid} 的after必须逐字且唯一；该片段原文：{original[:100]!r}")
+                offset = start + len(phrase)
+            else:
+                # Older saved products use numeric offsets. New model requests
+                # choose exact text; persisted provenance remains character-based.
+                offset = edit["offset"]
+            if type(offset) is not int or not 0 <= offset <= len(original):
+                raise ValueError(f"part {pid} 的offset={offset!r}超出0..{len(original)}；该片段原文：{original[:100]!r}")
+            if not isinstance(content, str) or not 1 <= len(content) <= 3 or any(c not in PUNCTUATION for c in content):
+                raise ValueError("只能插入至多三个许可标点，不得插入文字、空格或数字")
+            absolute = offsets[pid] + offset
+            if absolute in seen:
+                raise ValueError("同一原文位置的标点只能插入一次")
+            if 0 < absolute < len(full_text) and all(c.isascii() and (c.isalnum() or c in "_.+-") for c in full_text[absolute-1:absolute+1]):
+                raise ValueError("不能在数字、英文词或代码标识符中间插标点")
+            seen.add(absolute); inserts.setdefault(pid, []).append((offset, content))
+        except (ValueError, KeyError, TypeError) as error:
+            errors.append(f"insertions[{index}]: {error}")
+    if errors:
+        raise ValueError("；".join(errors[:12]) + (f"；共{len(errors)}处错误" if len(errors) > 12 else ""))
     for row in rows:
         for part in row["parts"]:
             original = part["text"]
