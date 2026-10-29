@@ -229,4 +229,52 @@ struct DialogueStrategyTests {
         }
         #expect(try String(contentsOf: fixture.folder.appendingPathComponent("notes.json"), encoding: .utf8) == notes)
     }
+
+    @Test func meetingStrategiesCopyInputsWithoutRunningModelsOrChangingOldTask() throws {
+        let fixture = try DialogueComparisonFixture(); defer { fixture.cleanup() }
+        let oldRequest = try Data(contentsOf: fixture.folder.appendingPathComponent("request.json"))
+        for strategy in [DialogueStrategy.meetingV3, .meetingBaseline] {
+            let comparison = try RecordingComparison.create(taskID: fixture.job.id, strategy: strategy, root: fixture.root)
+            #expect(comparison.state == "transcribed")
+            let target = fixture.directory(comparison.id)
+            #expect(try Data(contentsOf: target.appendingPathComponent("transcript.json")) == fixture.raw)
+            #expect(try AppStorage.read(ProcessingRequest.self, from: target.appendingPathComponent("request.json")).effectiveDialogueStrategy == strategy.rawValue)
+            #expect(!FileManager.default.fileExists(atPath: target.appendingPathComponent("checkpoints").path))
+            #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("request.json")) == oldRequest)
+        }
+    }
+
+    @Test func meetingBundlePreservesActionMetadataAndRejectsMismatchedStrategyEvenWithoutRequest() throws {
+        let fixture = try DialogueComparisonFixture(); defer { fixture.cleanup() }
+        let action = #"{"id":"action-0","text":"测试通过后发送结果。","source_ids":[0],"metadata":{"text":"发送结果。","kind":"action","state":"pending","conditions":["测试通过"],"scope":null,"speaker":"B","owner":"A","due":null}}"#
+        let notes = "{\"overview\":\"资料已具备\",\"chapters\":[],\"key_points\":[],\"action_items\":[\(action)],\"uncertainties\":[],\"model\":\"test\",\"tokensThisRun\":0,\"summaryStrategy\":\"meeting-v3\",\"evidenceItemCount\":2,\"assessmentCount\":2}"
+        let row = #"{"id":"row-0","text":"不。","source_ids":[0],"continuousReading":true,"parts":[{"id":"part-0","speaker":"unknown","text":"不。","source_ids":[0]}]}"#
+        let bundle = Data("{\"schemaVersion\":2,\"generationID\":\"meeting-generation\",\"strategy\":\"meeting-v3\",\"notes\":\(notes),\"condensed\":[\(row)]}".utf8)
+        try bundle.write(to: fixture.folder.appendingPathComponent("dialogue-results.json"))
+        let requestURL = fixture.folder.appendingPathComponent("request.json")
+        var request = try AppStorage.read(ProcessingRequest.self, from: requestURL)
+        #expect(throws: (any Error).self) { try RecordingResults.load(from: fixture.folder) }
+        request.dialogueStrategy = "meeting-v3"; try AppStorage.write(request, to: requestURL)
+        let result = try RecordingResults.load(from: fixture.folder)
+        #expect(result.notes?.isMeeting == true)
+        #expect(result.notes?.action_items?.first?.metadata?.conditions == ["测试通过"])
+        #expect(result.notes?.action_items?.first?.metadata?.due == nil)
+        #expect(result.condensed.first?.continuousReading == true)
+        #expect(result.condensed.first?.parts?.first?.speaker == "unknown")
+        #expect(result.condensed.first?.dialogueText(names: [:]) == "[归属未确定] 不。")
+        try FileManager.default.removeItem(at: requestURL)
+        #expect(try RecordingResults.load(from: fixture.folder).notes?.isMeeting == true)
+        let invalid = String(decoding: bundle, as: UTF8.self).replacingOccurrences(of: "\"strategy\":\"meeting-v3\"", with: "\"strategy\":\"meeting-baseline\"")
+        try Data(invalid.utf8).write(to: fixture.folder.appendingPathComponent("dialogue-results.json"))
+        #expect(throws: (any Error).self) { try RecordingResults.load(from: fixture.folder) }
+    }
+
+    @Test func meetingStagesKeepUsageUnknownUntilProviderReportsIt() {
+        for phase in ["meeting_draft", "meeting_evidence", "meeting_review", "meeting_reread", "meeting_punctuation"] {
+            var event = UsageEvent(purpose: "summary"); event.sourceKind = "recording"; event.phase = phase
+            #expect(event.phaseLabel != "总结")
+            #expect(event.sourceLabel == "录音整理")
+            #expect(event.usage.totalTokens == nil)
+        }
+    }
 }

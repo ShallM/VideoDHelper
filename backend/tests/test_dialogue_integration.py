@@ -79,6 +79,29 @@ class DialogueIntegrationTests(unittest.TestCase):
         for strategy in (None, "legacy", "context-v2"):
             validate_request({**self.request, "dialogueStrategy": strategy})
 
+    def test_meeting_routes_share_settings_publication_guard_and_action_export(self):
+        for strategy in ("meeting-v3", "meeting-baseline"):
+            request = {**self.request, "dialogueStrategy": strategy}
+            write_json(self.folder / "request.json", request)
+            calls = []
+            notes = {**self.notes, "action_items": [{"text": "[A]测试通过后再发送。", "source_ids": [0, 1, 2]}]}
+            def summarize(segments, title, config, folder, emit):
+                calls.append(config)
+                self.assertEqual(config["reasoningEffort"], "high")
+                self.assertEqual(config["pricing"], {"inputPerMillion": 2})
+                self.assertEqual(config["sourceKind"], "recording")
+                self.assertEqual(config["dialogueStrategy"], strategy)
+                config["beforePublish"]()
+                return notes, self.condensed
+            with patch.dict("sys.modules", {"meeting_reader": types.SimpleNamespace(summarize=summarize)}):
+                run_recording(request, self.record, self.folder, self.root, lambda *a: None,
+                              lambda *a: {"reasoningEffort": "high", "pricing": {"inputPerMillion": 2}})
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(read_json(self.folder / "job.json")["dialogueStrategy"], strategy)
+            self.assertIn("明确行动与前提", (self.folder / "study-notes.md").read_text())
+            self.assertIn("测试通过后再发送", (self.folder / "study-notes.md").read_text())
+            self.assertEqual(read_json(self.folder / "transcript.json"), self.segments)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -448,8 +448,12 @@ struct WorkspacePage: View {
                         .font(.caption).foregroundStyle(.secondary)
                     if model.currentJob != nil && !model.segments.isEmpty {
                         Menu {
-                            Button("全文对话理解 · 预览") { model.compareRecording(strategy: .contextV2) }
-                            Button("旧版对话流程 · 基线") { model.compareRecording(strategy: .legacy) }
+                            Button("会议纪要 · 预览") { model.compareRecording(strategy: .meetingV3) }
+                            Menu("更多对照") {
+                                Button("全文纪要 · 对照基线") { model.compareRecording(strategy: .meetingBaseline) }
+                                Button("上一版全文对话理解") { model.compareRecording(strategy: .contextV2) }
+                                Button("旧版对话流程") { model.compareRecording(strategy: .legacy) }
+                            }
                         } label: { Label("新建对照任务", systemImage: "square.on.square") }
                             .disabled(!model.canSummarizeRecording || otherIsBusy)
                             .help("复制原稿、校订与录音，保留当前任务的成果；不会自动调用模型。")
@@ -565,11 +569,12 @@ struct WorkspacePage: View {
     private func notesView(_ notes: StudyNotes) -> some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(spacing: 10) {
-                Label(notes.summaryStrategy == "context-v2" ? "全文对话理解" : model.isRecording ? "旧版对话流程" : notes.summaryStrategy == "structured" ? "全文理解" : notes.summaryStrategy == "compact" ? "紧凑输入对照" : "旧版分块", systemImage: "text.book.closed")
-                if notes.summaryStrategy == "context-v2", notes.summaryRoute == "hierarchical" { Text("长稿分层") }
+                Label(notes.isMeeting ? DialogueStrategy.label(for: notes.summaryStrategy) : notes.summaryStrategy == "context-v2" ? "全文对话理解" : model.isRecording ? "旧版对话流程" : notes.summaryStrategy == "structured" ? "全文理解" : notes.summaryStrategy == "compact" ? "紧凑输入对照" : "旧版分块", systemImage: "text.book.closed")
+                if notes.summaryRoute == "hierarchical" { Text("长稿分层") }
                 if let read = notes.reviewedParagraphs, let count = notes.paragraphCount {
-                    Text(notes.summaryStrategy == "context-v2" ? "原文复核 \(read)/\(count) 单元" : "核验已读 \(read)/\(count) 段")
+                    Text(notes.isMeeting || notes.summaryStrategy == "context-v2" ? "原文复核 \(read)/\(count) 单元" : "核验已读 \(read)/\(count) 段")
                 }
+                if let count = notes.assessmentCount, count > 0 { Text("检查 \(count) 项关键证据") }
                 if let count = notes.rereadCount, count > 0 { Text("定向回查 \(count) 处") }
             }.font(.caption).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 10) {
@@ -594,10 +599,22 @@ struct WorkspacePage: View {
                     }
                 }
             }
-            Divider()
-            Text(model.isRecording ? "主要观点与明确安排" : "关键结论").font(.title3.bold())
-            ForEach(Array(notes.key_points.enumerated()), id: \.offset) { _, item in
-                VStack(alignment: .leading, spacing: 8) { Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled); sourceButton(item.source_ids) }
+            if !notes.key_points.isEmpty {
+                Divider()
+                Text(model.isRecording ? "主要观点与明确安排" : "关键结论").font(.title3.bold())
+                ForEach(Array(notes.key_points.enumerated()), id: \.offset) { _, item in
+                    VStack(alignment: .leading, spacing: 8) { Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled); sourceButton(item.source_ids) }
+                }
+            }
+            if let actions = notes.action_items, !actions.isEmpty {
+                Divider()
+                Text("明确行动与前提").font(.title3.bold())
+                ForEach(Array(actions.enumerated()), id: \.offset) { _, item in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled)
+                        sourceButton(item.source_ids)
+                    }
+                }
             }
             if !notes.uncertainties.isEmpty {
                 Text("待核对内容").font(.title3.bold())

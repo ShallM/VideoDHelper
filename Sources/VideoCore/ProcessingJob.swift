@@ -170,6 +170,8 @@ public struct ProcessingRequest: Codable, Sendable {
 public enum DialogueStrategy: String, CaseIterable, Codable, Sendable {
     case legacy
     case contextV2 = "context-v2"
+    case meetingV3 = "meeting-v3"
+    case meetingBaseline = "meeting-baseline"
 
     // The new reader stays opt-in until semantic regression gates are met.
     public static let defaultForNewTasks: DialogueStrategy = .legacy
@@ -178,6 +180,8 @@ public enum DialogueStrategy: String, CaseIterable, Codable, Sendable {
         switch value {
         case nil, Self.legacy.rawValue: return "旧版对话流程"
         case Self.contextV2.rawValue: return "全文对话理解 · 预览"
+        case Self.meetingV3.rawValue: return "会议纪要 · 预览"
+        case Self.meetingBaseline.rawValue: return "全文纪要 · 对照基线"
         default: return "其他对话流程"
         }
     }
@@ -202,6 +206,8 @@ public struct CitedText: Codable, Sendable {
     public var speaker: String?
     public let parts: [DialoguePart]?
     public let status: String?
+    public var continuousReading: Bool? = nil
+    public var metadata: MeetingStatementMetadata? = nil
 
     public func dialogueText(names: [String: String]) -> String {
         if let parts, !parts.isEmpty {
@@ -215,6 +221,16 @@ public struct CitedText: Codable, Sendable {
         else { name = "归属未确定" }
         return "\(name)：\(text)"
     }
+}
+public struct MeetingStatementMetadata: Codable, Sendable {
+    public let text: String
+    public let kind: String
+    public let state: String
+    public let conditions: [String]
+    public let scope: String?
+    public let speaker: String
+    public let owner: String?
+    public let due: String?
 }
 public struct StudyChapter: Codable, Sendable {
     public let source_ids: [Int]
@@ -236,6 +252,10 @@ public struct StudyNotes: Codable, Sendable {
     public let paragraphCount: Int?
     public let rereadCount: Int?
     public let recordingRevision: String?
+    public var action_items: [CitedText]? = nil
+    public var evidenceItemCount: Int? = nil
+    public var assessmentCount: Int? = nil
+    public var isMeeting: Bool { ["meeting-v3", "meeting-baseline"].contains(summaryStrategy ?? "") }
 }
 
 /// One publication generation: notes and cleaned dialogue are always read together.
@@ -244,6 +264,7 @@ public struct DialogueResultsBundle: Codable, Sendable {
     public let generationID: String
     public let notes: StudyNotes
     public let condensed: [CitedText]
+    public var strategy: String? = nil
 }
 
 public struct RecordingResults: Sendable {
@@ -254,13 +275,17 @@ public struct RecordingResults: Sendable {
         let bundleURL = directory.appendingPathComponent("dialogue-results.json")
         if FileManager.default.fileExists(atPath: bundleURL.path) {
             let bundle = try AppStorage.read(DialogueResultsBundle.self, from: bundleURL)
-            guard bundle.schemaVersion == 1, !bundle.generationID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            guard [1, 2].contains(bundle.schemaVersion), !bundle.generationID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw VideoError.toolFailed("录音成果版本无法读取，已保留原文件。")
+            }
+            let expected = bundle.schemaVersion == 1 ? DialogueStrategy.contextV2.rawValue : bundle.strategy
+            guard bundle.schemaVersion == 1 || (["meeting-v3", "meeting-baseline"].contains(expected ?? "") && bundle.notes.summaryStrategy == expected) else {
+                throw VideoError.toolFailed("录音成果中的流程标识不一致，已保留原文件。")
             }
             let requestURL = directory.appendingPathComponent("request.json")
             if FileManager.default.fileExists(atPath: requestURL.path) {
                 let request = try AppStorage.read(ProcessingRequest.self, from: requestURL)
-                guard request.effectiveDialogueStrategy == DialogueStrategy.contextV2.rawValue else {
+                guard request.effectiveDialogueStrategy == expected else {
                     throw VideoError.toolFailed("录音任务流程与成套成果不一致，可能曾被旧版应用更新。已保留原稿和所有成果文件；请从原稿新建对照任务重新整理，不会自动选择或混用两代结果。")
                 }
             }

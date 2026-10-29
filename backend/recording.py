@@ -303,8 +303,9 @@ def export_dialogue(folder, title, segments, names, notes=None, condensed=None):
         lines += [f"## {display_text(chapter['title'], names)}"]
         for claim in chapter.get("claims", []):
             lines += [display_text(claim["text"], names), f"录音时间：{refs(claim['source_ids'])}"]
-    for label, key in (("主要观点与明确安排", "key_points"), ("分歧与待核对", "uncertainties")):
-        lines += [f"## {label}"] + [f"- {display_text(item['text'], names)}（{refs(item['source_ids'])}）" for item in notes[key]]
+    for label, key in (("主要观点与明确安排", "key_points"), ("明确行动与前提", "action_items"), ("分歧与待核对", "uncertainties")):
+        if notes.get(key):
+            lines += [f"## {label}"] + [f"- {display_text(item['text'], names)}（{refs(item['source_ids'])}）" for item in notes[key]]
     write_text(folder / "study-notes.md", "\n\n".join(lines) + "\n")
     def cleaned_row(item):
         parts = item.get("parts")
@@ -343,7 +344,7 @@ def run_recording(request, record, folder, support, emit, load_config, env_file=
                       summaryReview=request.get("summaryReview", True), sourceRevision=revision,
                       recordingRevision=read_json(folder / "transcript-edits.json")["revision"] if (folder / "transcript-edits.json").exists() else "original")
         strategy = request.get("dialogueStrategy") or "legacy"
-        if strategy == "context-v2":
+        if strategy in ("context-v2", "meeting-v3", "meeting-baseline"):
             # Derived context depends on acoustic boundaries as well as text.
             # Display names are deliberately excluded: a rename is presentation.
             config.update(dialogueStrategy=strategy, transcriptIdentity=digest(segments),
@@ -355,7 +356,10 @@ def run_recording(request, record, folder, support, emit, load_config, env_file=
                         or current_revision != revision or digest(current) != config["transcriptIdentity"]):
                     raise UserError("原稿或任务选项已变化，本轮结果未覆盖当前成果。已保存阶段，可按当前原稿重新整理。")
             config["beforePublish"] = before_publish
-            from dialogue_reader import summarize
+            if strategy == "context-v2":
+                from dialogue_reader import summarize
+            else:
+                from meeting_reader import summarize
         elif strategy == "legacy":
             from summary_v2 import summarize
         else:

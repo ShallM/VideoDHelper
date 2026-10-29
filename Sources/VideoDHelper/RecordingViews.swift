@@ -4,11 +4,25 @@ import VideoCore
 struct RecordingCondensedText: View {
     @ObservedObject var model: WorkspaceModel
     let item: CitedText
+    @State private var showAttribution = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let parts = item.parts, !parts.isEmpty {
-                mixedText(parts).lineSpacing(6).textSelection(.enabled)
+                if item.continuousReading == true {
+                    let speakers = ["A", "B"].filter { speaker in parts.contains { $0.speaker == speaker } }
+                    let uncertain = parts.contains { $0.speaker != "A" && $0.speaker != "B" }
+                    HStack(spacing: 8) {
+                        if !speakers.isEmpty { Text(speakers.map { model.speakerName($0) }.joined(separator: " / ")) }
+                        if uncertain { Label(speakers.isEmpty ? "归属未确定" : "含归属未确定片段", systemImage: "person.crop.circle.badge.questionmark") }
+                    }.font(.caption).foregroundStyle(.secondary)
+                    Text(parts.map { model.displayText($0.text) }.joined()).lineSpacing(6).textSelection(.enabled)
+                    DisclosureGroup("逐段归属", isExpanded: $showAttribution) {
+                        mixedText(parts).lineSpacing(6).textSelection(.enabled).padding(.top, 5)
+                    }.font(.caption).foregroundStyle(.secondary)
+                } else {
+                    mixedText(parts).lineSpacing(6).textSelection(.enabled)
+                }
             } else {
                 Text(model.speakerName(item.speaker)).font(.caption).foregroundStyle(.teal)
                 Text(model.displayText(item.text)).lineSpacing(6).textSelection(.enabled)

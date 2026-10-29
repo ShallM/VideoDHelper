@@ -148,7 +148,7 @@ class ChatClient:
             with self.usage_lock:
                 self.limit_hits += 1
                 self.calls.append({"phase": phase, "checkpoint": path.stem, "limitCached": True})
-            if cached_kind is None and str(self.config.get("summaryVersion", "")).startswith("dialogue-reader-"):
+            if cached_kind is None and str(self.config.get("summaryVersion", "")).startswith(("dialogue-reader-", "meeting-reader-")):
                 raise ReasoningOutputExhausted("历史记录显示输出额度耗尽，但中断前未记录结果类型，无法确认是否包含正文。已保留原稿和用量，保守停止自动拆分；请检查模型预算后继续。")
             raise InputContextLimit() if cached_kind == "provider_context_limit" else ResponseOutputLimit()
         feedback = ""
