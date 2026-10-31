@@ -9,7 +9,7 @@ from unittest.mock import patch
 from common import UserError, read_json, write_json
 from dialogue_context import build_context
 from dialogue_reader import Reader
-from meeting_contract import validate_item, validate_document, punctuation_rows, render_item, anchor, REREAD_PROMPT
+from meeting_contract import validate_item, validate_evidence_item, validate_document, punctuation_rows, render_item, anchor, REREAD_PROMPT
 from meeting_reader import MeetingReader, compact_evidence, format_dialogue
 from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted, ResponseOutputLimit
 from worker import validate_request
@@ -596,6 +596,104 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(e.document["chapters"][0]["claims"][0]["id"], "claim-0")
         self.assertEqual(e.document["chapters"][0]["claims"][0]["conditions"], ["测试通过才发送结果"])
         self.assertEqual(e.patch_log[0]["after"], e.document)
+
+    def test_source_observations_do_not_promote_classifications_to_facts(self):
+        e = self.reader()
+        observation = item(e.units[0], text="中文资料已经有了。", kind="decision", state="pending", owner="B")
+        result = validate_evidence_item(observation, e.lookup)
+        self.assertEqual(set(result), {"text", "evidence", "u"})
+        self.assertEqual(result["text"], observation["text"])
+        self.assertEqual(result["evidence"][0]["quote"], transcript()[0]["text"])
+        bad = {**observation, "evidence": [{"unit": 0, "quote": "不存在的原文"}]}
+        with self.assertRaises(ValueError): validate_evidence_item(bad, e.lookup)
+
+    def test_field_patch_preserves_unmentioned_conditions_scope_and_action_owner(self):
+        e = self.prepared()
+        action = item(e.units[0], text="发送结果。", kind="action", state="pending", owner="A",
+                      conditions=["测试通过"], scope="本次试验", due="测试通过后",
+                      evidence=[{"unit": 0, "first_part": 1, "last_part": 1}], speaker="A", attribution_parts=[1])
+        validate_item(action, e.lookup, action=True)
+        action["id"] = "action-0"
+        e.document["action_items"].append(action)
+        before = copy.deepcopy(action)
+        repair = empty_review()
+        repair["patches"] = [{"target_id": "action-0", "action": "update", "changes": {"text": "先复现程序，再发送结果。"},
+                              "reason": "补回动作依赖，测试前提仍保留。", "check_ids": []}]
+        for _ in range(2):
+            e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks)
+        self.assertEqual(action, before)
+        e.apply_repair(repair, "review")
+        after = e.document["action_items"][0]
+        for field in set(before) - {"text"}:
+            self.assertEqual(after[field], before[field], field)
+        rendered = e.cited(after)["text"]
+        self.assertIn("测试通过", rendered)
+        self.assertIn("本次试验", rendered)
+        self.assertEqual(e.patch_log[0]["proposal"]["patches"][0]["changes"], {"text": "先复现程序，再发送结果。"})
+
+    def test_field_patch_rejects_identity_unknown_fields_and_invalid_merged_attribution(self):
+        e = self.prepared()
+        for changes in ({}, {"id": "claim-fake"}, {"u": [999]}, {"future_option": True},
+                        {"speaker": "A"}, {"evidence": [{"unit": 999, "first_part": 0, "last_part": 0}]}):
+            with self.subTest(changes=changes):
+                repair = empty_review()
+                repair["patches"] = [{"target_id": "claim-0", "action": "update", "changes": changes,
+                                      "reason": "合成非法字段或不一致来源", "check_ids": []}]
+                before = copy.deepcopy(e.document)
+                with self.assertRaises(ValueError):
+                    e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks)
+                self.assertEqual(e.document, before)
+
+    def test_field_patch_round_trip_resume_keeps_saved_sources_and_no_extra_requests(self):
+        def repair(client, body, phase, payload):
+            if phase == "meeting_review":
+                return self.envelope({**empty_review(), "patches": [{"target_id": "claim-0", "action": "update",
+                    "changes": {"text": "中文资料已经具备，实验条件也齐备。"},
+                    "reason": "补回同一原文中资源条件；保留原状态和归属。", "check_ids": []}]})
+        self.hook = repair
+        _, (notes, _) = self.run_reader()
+        claim = notes["chapters"][0]["claims"][0]
+        self.assertEqual(claim["metadata"]["state"], "current")
+        self.assertEqual(claim["source_ids"], [0])
+        self.assertIn("实验条件", claim["text"])
+        before = len(self.requests)
+        _, (again, _) = self.run_reader()
+        self.assertEqual(len(self.requests), before)
+        self.assertEqual(again["chapters"], notes["chapters"])
+        self.assertEqual(again["tokensThisRun"], 0)
+
+    def test_explicit_clear_and_uncertainty_field_patch_use_existing_guards(self):
+        e = self.prepared()
+        e.document["chapters"][0]["claims"][0]["scope"] = "错误的范围"
+        repair = empty_review()
+        repair["patches"] = [{"target_id": "claim-0", "action": "update", "changes": {"scope": None},
+                              "reason": "原文没有该范围，不应保留。", "check_ids": []}]
+        e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks)
+        e.apply_repair(repair, "review")
+        self.assertIsNone(e.document["chapters"][0]["claims"][0]["scope"])
+        e.document["uncertainties"] = [{"id": "uncertainty-0", "text": "需回听", "u": [0], "status": "needs_audio"}]
+        repair["patches"] = [{"target_id": "uncertainty-0", "action": "update", "changes": {"text": "该词需回听确认。"},
+                              "reason": "明确需要回听的内容。", "check_ids": []}]
+        e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks)
+        e.apply_repair(repair, "review")
+        self.assertEqual(e.document["uncertainties"][0]["status"], "needs_audio")
+        repair["patches"][0]["changes"] = {"status": "unresolved"}
+        with self.assertRaisesRegex(ValueError, "需回听"):
+            e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks)
+
+    def test_review_may_add_exact_source_omission_absent_from_independent_inventory(self):
+        e = self.prepared()
+        repair = empty_review()
+        repair["additions"] = [{"chapter_id": "topic-0", "item": item(e.units[0], text="实验条件也齐备。"),
+                                "check_ids": [], "reason": "直接核对原文发现清单也遗漏了实验条件。"}]
+        e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks, owned_units={0})
+        e.apply_repair(repair, "review")
+        self.assertEqual(len(e.document["chapters"][0]["claims"]), 2)
+        with self.assertRaisesRegex(ValueError, "本批负责原文"):
+            e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks, owned_units={99})
+        repair["additions"][0]["check_ids"] = ["check-does-not-exist"]
+        with self.assertRaises(ValueError):
+            e.validate_repair(repair, e.units, e.meeting_targets(), set(e.meeting_targets()), e.checks)
 
     def test_statement_playback_uses_cited_parts_not_entire_reading_unit(self):
         e = self.prepared()

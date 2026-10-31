@@ -12,12 +12,12 @@ from dialogue_context import source_text, select_context
 from dialogue_reader import Reader, condensed_batches, citations, validate_reader_text
 from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, DRAFT_PROMPT,
     EVIDENCE_PROMPT, REVIEW_PROMPT, REREAD_PROMPT, PUNCTUATE_PROMPT, validate_document,
-    validate_item, validate_items, punctuation_rows, render_item, string, anchor, OPTIONAL_DEFAULTS)
+    validate_item, validate_evidence_item, punctuation_rows, render_item, string, anchor, OPTIONAL_DEFAULTS)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit, OutputLimit
 from summary_v2 import estimated_tokens
 
-VERSION = "meeting-reader-v3.13"
-PROMPT_VERSION = "meeting-prompts-v1.6"
+VERSION = "meeting-reader-v3.14"
+PROMPT_VERSION = "meeting-prompts-v1.7"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
 VALIDATION_FEEDBACK_CHARS = 1600
@@ -151,8 +151,8 @@ class MeetingReader(Reader):
         def validate(value):
             if not isinstance(value.get("items"), list) or len(value["items"]) > 600:
                 raise ValueError("items须为有限关键事实列表")
-            validate_items(((f"items[{i}]", item, isinstance(item, dict) and item.get("kind") == "action") for i, item in enumerate(value["items"])),
-                           {u["id"]: u for u in source_units})
+            lookup = {u["id"]: u for u in source_units}
+            value["items"] = [validate_evidence_item(item, lookup) for item in value["items"]]
             for item in value["items"]:
                 if not ids.intersection(item["u"]):
                     raise ValueError("核对项必须涉及本批owned_units，不能只复述邻接背景")
@@ -168,7 +168,7 @@ class MeetingReader(Reader):
         # This is request responsibility, not a model's claim of completeness.
         self.source_coverage.append({"ownedUnits": sorted(ids), "contextUnits": [u["id"] for u in neighbours]})
         for item in value["items"]:
-            identity = "check-" + digest({k: item[k] for k in ("text", "kind", "state", "evidence")})[:20]
+            identity = "check-" + digest({k: item[k] for k in ("text", "evidence")})[:20]
             self.checks.setdefault(identity, {**copy.deepcopy(item), "id": identity})
 
     def punctuate(self, units, depth=0):
@@ -217,7 +217,7 @@ class MeetingReader(Reader):
                 result[item["id"]] = {"id": item["id"], "target_kind": kind, "value": item}
         return result
 
-    def validate_repair(self, value, units, targets, owned_targets, owned_checks, *, reread=False):
+    def validate_repair(self, value, units, targets, owned_targets, owned_checks, *, reread=False, owned_units=None):
         allowed = {u["id"]: u for u in units}
         # Old diagnostic candidates remain readable, but a mechanical per-check
         # verdict is no longer required from the model or counted as accuracy.
@@ -244,18 +244,30 @@ class MeetingReader(Reader):
         mutated = set()
         for patch in value["patches"]:
             tid = patch.get("target_id")
-            if tid not in owned_targets or tid in mutated or patch.get("action") not in ("replace", "remove"):
+            if tid not in owned_targets or tid in mutated or patch.get("action") not in ("update", "replace", "remove"):
                 raise ValueError("补丁只能修改本批负责目标，每个目标一次")
             mutated.add(tid); string(patch.get("reason"))
             if not isinstance(patch.get("check_ids"), list) or any(i not in self.checks for i in patch["check_ids"]):
                 raise ValueError("补丁check_ids必须来自现有核对清单")
             target = targets[tid]
             if patch["action"] == "remove":
+                if "changes" in patch:
+                    raise ValueError("remove不能同时包含changes")
                 if target["target_kind"] == "overview" or patch.get("replacement") is not None:
                     raise ValueError("不能删除概览；remove的replacement须为null")
                 if target["target_kind"] == "uncertainty" and target["value"].get("status") == "needs_audio":
                     raise ValueError(f"{tid}需回听，不能仅凭文字删除")
                 continue
+            if patch["action"] == "update":
+                fields = ({"text", "u", "status"} if target["target_kind"] == "uncertainty" else
+                          {"text", "u"} if target["target_kind"] == "overview" else
+                          {"text", "kind", "state", "conditions", "scope", "speaker", "attribution_parts", "owner", "due", "evidence"})
+                changes = patch.get("changes")
+                if not isinstance(changes, dict) or not changes or not set(changes).issubset(fields):
+                    raise ValueError(f"{tid}的changes须为非空字段补丁，允许字段：{','.join(sorted(fields))}")
+                # Normalize into the existing application path only after
+                # retaining every unspecified field. Revalidation is idempotent.
+                patch["replacement"] = {**copy.deepcopy(target["value"]), **copy.deepcopy(changes)}
             replacement = patch["replacement"]
             if target["target_kind"] in ("overview", "uncertainty"):
                 required = {"text", "u", "status"} if target["target_kind"] == "uncertainty" else {"text", "u"}
@@ -275,10 +287,12 @@ class MeetingReader(Reader):
         for addition in value["additions"]:
             if addition.get("chapter_id") not in chapters:
                 raise ValueError("新增内容需选择已有章节、actions或supplement")
-            if not isinstance(addition.get("check_ids"), list) or not addition["check_ids"] or any(i not in owned_checks for i in addition["check_ids"]):
-                raise ValueError("补充须由本批独立核对项支持")
+            if not isinstance(addition.get("check_ids"), list) or any(i not in owned_checks for i in addition["check_ids"]):
+                raise ValueError("补充check_ids须来自本批清单；原文中新发现的遗漏可用空数组")
             string(addition.get("reason"))
             validate_item(addition["item"], allowed, action=addition["chapter_id"] == "actions")
+            if not addition["check_ids"] and owned_units is not None and not set(addition["item"]["u"]).intersection(owned_units):
+                raise ValueError("新发现的遗漏须引用本批负责原文，邻接背景不归本批补充")
         for issue in value["issues"]:
             if issue.get("target_id") not in set(targets) | set(owned_checks) or issue.get("field") not in FIELDS or issue.get("kind") not in ISSUE_KINDS:
                 raise ValueError("疑点必须关联现有声明/核对项及明确字段")
@@ -375,7 +389,7 @@ class MeetingReader(Reader):
             payload.update(sources=source_text(units), targets=list(targets.values()))
         try:
             value = self.call(REVIEW_PROMPT, compact_evidence(payload),
-                lambda v: self.validate_repair(v, units, targets, target_ids, checks), "meeting_review")
+                lambda v: self.validate_repair(v, units, targets, target_ids, checks, owned_units=ids), "meeting_review")
         except InputContextLimit:
             if len(owned) < 2 or depth >= 12:
                 raise UserError("核验所需原文与跨段证据超过容量；未丢弃证据或标为完成") from None

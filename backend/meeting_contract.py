@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1.7"
+VERSION = "meeting-products-v1.8"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -25,6 +25,13 @@ evidence选择给定unit内连续的part编号范围(first_part到last_part，�
 只返回一个合法JSON对象，不输出代码围栏、推理过程或格式说明。
 """
 
+SEMANTIC_EXAMPLES = """以下仅说明表达边界，不是本次录音事实，也不能引用其中的人、物或数字：
+例1：原话“旧版手册你已经拿到了，修订版我校对后再发。”应分开保留旧版已到手、修订版校对后待发；不能合成“待发两份手册”，也不能把校对前提删除。对象、版本、动作或状态不同就分项；同一事实的条件不要拆散。
+例2：原话“我平时先做小试；这次建议你负责演示，我来答疑。”前半是个人做法，后半是单方提议；没有对方明确接受就不写“双方决定”。自己明确承诺的动作可记行动，但替别人安排不等于对方已承诺。只说“嗯”不能自动证明同意邻近的全部安排。明确的共同决定需有相应确认依据；个人做法不用decision标签。
+例3：原话“如果赶时间就先用旧设备，不急的话等新设备；没有规定周五前完成。”保留选择条件和没有截止期限，不能写成“周五前用旧设备完成”。条件、范围和执行依赖都是要点，不是可随意省略的附注。
+例4：口述“每组约七人，三组一共二十人，可能记错了。”保留口述口径不一致及需确认，不能自行算成二十一人，也不能当成确定统计。对语义含混的规定或转录词，保留说法与不确定，不替说话人给出政策解释。
+"""
+
 ITEM_SCHEMA = """普通条目只需正文和来源：
 {"text":"完整保留实质内容、限制和不确定性，不写说话人前缀","evidence":[{"unit":0,"first_part":0,"last_part":2}]}。
 仅在有实际含义时添加字段，不重复填空字段：kind(fact/opinion/question_answer/proposal/decision/action)、state(current/pending/completed/withdrawn/uncertain/not_applicable)、conditions(前提数组)、scope(适用范围)、speaker(A/B/unknown/none)、attribution_parts(归属来源编号)。
@@ -36,7 +43,7 @@ owner仅action条目可填A或B，无法确认则null；due仅有明确承诺期
 state=not_applicable用于没有完成状态的问题/观点等，不强行把所有话语转成待办。待执行建议仍是proposal，不伪装成已确认action。
 """
 
-DRAFT_PROMPT = RULES + ITEM_SCHEMA + """
+DRAFT_PROMPT = RULES + SEMANTIC_EXAMPLES + ITEM_SCHEMA + """
 完整阅读本次sources，生成详细而不重复的会议纪要。先写约200字概览，再按实际主题保存双方观点、问答、条件、重要细节与更正。
 不按固定压缩比例删减重要事实，不逐句复述口头语，不为了填模板制造共识或行动。state、conditions、scope必须与text一致；最终由程序呈现这些字段。
 返回{"overview":{"text":"概览","u":[0]},"chapters":[{"title":"实际主题","claims":[声明]}],"action_items":[声明],"uncertainties":[{"text":"真正的疑点","u":[0],"status":"unresolved或needs_audio"}]}。
@@ -45,33 +52,35 @@ overview与每项uncertainties的u各选1至12处最相关单元，不罗列全�
 若输入含partial_documents，它们只是带原文证据的候选笔记。合并同一主题，保留跨段条件、更正、状态区别和证据，不新增事实。overview的u只用allowed_u中的编号。
 """
 
-EVIDENCE_PROMPT = RULES + ITEM_SCHEMA + """
+EVIDENCE_PROMPT = RULES + SEMANTIC_EXAMPLES + """
 本次只读原文，不提供也不要猜测任何摘要草稿。列出影响理解或执行的重要核对项：核心观点、问答结论、现有资源、待交付承诺、动作、条件/范围、否定、数字以及后续更正。
-每项表达一个可独立核对的事实或关系，保留状态和限制；别把模糊词解释成确定含义。只负责owned_units，其他context仅解释前后关联。
+返回{"items":[{"text":"一项可核对事实或关系，写明对象、状态及其必要条件","evidence":[{"unit":0,"first_part":0,"last_part":2}]}]}。
+这不是第二份纪要：不生成章节、负责人、完成状态等分类字段。直接忠实记录原话中的对象、时间关系和条件，避免先归类再推断。不同材料、版本、动作不能共用含糊的“已准备/待提供”；分别陈述。每项只含一个可独立核对事实，必要的问答、更正和前提属于同一关系，须一并保留。只负责owned_units，其他context仅解释前后关联。
 同一事项有前后变化时，提取变化关系及最终有效状态，同时引用原说法与后续回应/更正；不要把每句话孤立为互不相关的事实。发起人明确收回或改为不执行的早期提议不能仍为pending；仅另一方反对而发起人未表态时，保留分歧，不擅自认定撤回或双方决定。无法确定最终状态用uncertain并说明限制。
-返回{"items":[证据条目]}。只列影响理解或执行的重要核对项，不给每个单元机械分配条目，不生成逐单元coverage表。程序另外记录提供给本请求的原文范围。
+检查原文中的研究/工作背景、实施顺序、资源可用性、反馈与协作、替代路径、范围限制和收尾安排是否各有实质记录；原文没有的类别不补造。别把整段多项事实压成一句主题介绍，也不把所有例子逐字摘抄。不按单元机械配额，不生成coverage表，程序另记请求范围。
 不要为满足数量扩写或复制每句口头语。重要事实不能因为出现在收尾或很短的应答中被忽略。
 """
 
-REVIEW_PROMPT = RULES + ITEM_SCHEMA + """
+REVIEW_PROMPT = RULES + SEMANTIC_EXAMPLES + ITEM_SCHEMA + """
 对照sources原文、独立核对清单checks和草稿targets，核验本次owned_checks与owned_targets。先根据原文确认清单本身，再检查摘要；不能盲信清单或草稿。
 分别查：重要遗漏、无依据陈述、条件/范围丢失、状态改变、数字或否定错误、错误归属、重复。尤其检查补丁会不会把原本正确的内容改坏。
 还要把同一事项的相关targets与checks放在一起按原文先后核对：较晚的明确撤回、更正、否定或条件回应，是否改变早先条目的最终状态。不能因为早先原句存在就把过时的pending认作covered；也不能仅凭另一人的反对认定发起人已撤回。正文、状态标签和行动列表必须一致，不得一处写不执行、另一处仍当作待完成任务。必要时修改早期条目，保留变化过程及两处证据；不是把矛盾两边分别照抄就算核验完成。
-返回{"patches":[{"target_id":"给定目标id","action":"replace或remove","replacement":声明或null,"reason":"具体错误及修复依据","check_ids":["核对项id"]}],
+返回{"patches":[{"target_id":"给定目标id","action":"update","changes":{"text":"仅在正文确需修订时填写完整新正文"},"reason":"具体错误及原文依据，说明原有有效限制如何保留","check_ids":["核对项id"]}],
 "additions":[{"chapter_id":"已有章节id，行动用actions，无合适主题用supplement","item":声明,"check_ids":["核对项id"],"reason":"遗漏内容"}],
 "issues":[{"target_id":"现有目标id","field":"text/kind/state/conditions/scope/speaker/owner/due/number之一","kind":"omission/unsupported/state/condition/scope/attribution/number/negation/correction/duplicate/audio之一","question":"中性的具体问题","u":[0],"query":"原文检索词或空字符串","status":"unresolved或needs_audio"}]}。
-检查全部owned_checks，但只返回确实需要修订、补充或待确认的内容；没有问题时三个数组为空。不输出逐项assessments，也不重复抄写正确条目。仅修改owned_targets。按target_kind选择replacement：claim/action为声明，overview用{"text":"约200字概览","u":[0]}，uncertainty用{"text":"仍待确认的问题","u":[0],"status":"unresolved或needs_audio"}。不要给uncertainty返回声明的kind/state/evidence结构，也不能省略u或status。
-只有明确实质错误才修订，不做文风润色。不能删除概览。conditions/scope/state变化必须在reason解释原证据及新解释。新声明同样需要逐字证据。
+检查全部owned_checks，同时从原文寻找清单也遗漏的条件和关系；清单不是事实真值。只返回实质问题，没有问题时三个数组为空。不输出逐项assessments，不重抄正确条目。仅修改owned_targets。
+update的changes仅列真正变化字段，程序保留其他字段。claim/action允许text/kind/state/conditions/scope/speaker/attribution_parts/owner/due/evidence；overview仅text/u；uncertainty仅text/u/status。不修改id，不返回replacement。数组是完整新数组，清空须明确[]，可空标量清空用null；evidence变化须包含修改后整条仍需的全部来源。删掉无依据或重复条目使用action=remove、replacement=null，不带changes，不能删除概览。
+补丁前逐一核对：原条目里仍有原文支持的对象、条件、范围、不确定性有没有被新版正文/字段遗漏。只更正一个词也要保留其他实质内容。不要为统一文风或凑类型改动kind/state；把个人习惯改成决定是错误，不是优化。conditions/scope/state的修改或清空须在reason指出具体原文依据。新声明同样需要逐字证据；新增内容确实不在清单时check_ids可为空，reason说明原文遗漏。
 不确定的事实不能写成肯定结论；原文无法确定时登记一个疑点。真正听不清用needs_audio。已有needs_audio目标不能删除或改为unresolved，关联issues也必须needs_audio，不能安排文字回读冒充听音。相同目标的相同字段只登记一个问题，不用换措辞重复提问。
 每批最多30个补丁、30个补充和12个疑点；超出时在unhandled_errors中列出剩余问题，不能假装检查完成。没有剩余问题则unhandled_errors为空数组。
 """
 
-REREAD_PROMPT = RULES + ITEM_SCHEMA + """
+REREAD_PROMPT = RULES + SEMANTIC_EXAMPLES + ITEM_SCHEMA + """
 只处理issue中已经登记的一个问题；先根据sources回答，再核对targets。不要重新全面检查，也不能登记新问题。
 返回{"status":"resolved/unresolved/needs_audio之一","reason":"实际证据或未能解决的原因",
-"patches":[{"target_id":"给定目标id","action":"replace或remove","replacement":完整声明或null,"reason":"修订理由","check_ids":[]}],
+"patches":[{"target_id":"给定目标id","action":"update","changes":{"text":"修订后的完整正文"},"reason":"修订理由及保留的原有限制","check_ids":[]}],
 "additions":[],"assessments":[],"issues":[],"unhandled_errors":[]}。
-按target_kind选择replacement：claim/action为完整声明，overview用{"text":"概览","u":[0]}，uncertainty用{"text":"仍待确认的问题","u":[0],"status":"unresolved或needs_audio"}。uncertainty不是声明，不能返回kind/state等声明结构代替u/status。
+changes只列确需修改字段，其余由程序保留。claim/action可改text/kind/state/conditions/scope/speaker/attribution_parts/owner/due/evidence；overview仅text/u；uncertainty仅text/u/status，不能返回声明的kind/state等字段。数组为完整新数组，必须保留仍有依据的条件及引用。删除用action=remove、replacement=null，不带changes；不能删除概览。
 没有证据增益则不提交补丁。需要听音不能仅凭文字关闭，也不能删除或降低原有needs_audio标记。文字已能解决的疑点可返回status=resolved、patches为空，并在顶层附evidence:[{"unit":0,"first_part":0,"last_part":2}]；不要把已解决的答案写成新的待确认事项。程序会收起该已解决问题，保留处理依据。
 """
 
@@ -149,6 +158,21 @@ def validate_items(entries, units):
             errors.append(f"{path}: {detail}")
     if errors:
         raise ValueError("声明校验未通过，共" + str(len(errors)) + "处。只选真实来源与同标签归属，未知不猜人。" + "；".join(errors))
+
+
+def validate_evidence_item(item, units):
+    """An independent source observation is not a classified final claim."""
+    if not isinstance(item, dict):
+        raise ValueError("核对项须为含text及evidence的对象")
+    string(item.get("text"))
+    proofs = item.get("evidence")
+    if not isinstance(proofs, list) or not 1 <= len(proofs) <= 16:
+        raise ValueError("核对项须含1至16处原文证据")
+    proofs = [anchor(p, units) for p in proofs]
+    ids = sorted({p["unit"] for p in proofs})
+    validate_reader_text(item["text"], [units[i]["text"] for i in ids])
+    # Do not feed unsolicited classifications back to the reviewer as facts.
+    return {"text": item["text"], "evidence": proofs, "u": ids}
 
 
 def validate_item(item, units, *, action=False):
