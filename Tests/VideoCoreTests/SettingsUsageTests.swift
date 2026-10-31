@@ -4,6 +4,53 @@ import Testing
 
 @Suite("Settings and accounting")
 struct SettingsUsageTests {
+    @Test func reasoningStrengthPersistsAndUsesModelSpecificOptions() throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("preferences.json")
+        var preferences = AppPreferences()
+        #expect(preferences.defaultModel?.reasoningEffort == "low")
+        #expect(ReasoningEffort.options(for: "deepseek-v4.1-flash").map(\.rawValue) == ["default", "low", "high", "max"])
+        #expect(ReasoningEffort.options(for: "provider/deepseek-flash").contains(.max))
+        for effort in ["default", "low", "high", "max"] {
+            preferences.providers[0].models[0].reasoningEffort = effort
+            try preferences.save(to: file)
+            #expect(try AppPreferences.load(from: file).defaultModel?.reasoningEffort == effort)
+        }
+        preferences.providers[0].models[0].reasoningEffort = "medium"
+        #expect(throws: (any Error).self) { try preferences.validate() }
+        preferences.providers[0].models[0].modelID = "compatible-model"
+        try preferences.validate()
+        preferences.providers[0].models[0].reasoningEffort = "typo"
+        #expect(throws: (any Error).self) { try preferences.validate() }
+    }
+
+    @Test func connectionRequestsSendStrengthAndDoNotDropUnsupportedValues() throws {
+        var model = LanguageModel(modelID: "compatible-model")
+        for effort in ReasoningEffort.allCases {
+            model.reasoningEffort = effort.rawValue
+            let body = try ProviderAPI.connectionTestBody(model: model)
+            #expect(body["reasoning_effort"] as? String == (effort == .providerDefault ? nil : effort.rawValue))
+            #expect((body["max_tokens"] as? Int ?? 0) > 512)
+        }
+        model.reasoningEffort = "ultra"
+        #expect(throws: (any Error).self) { try ProviderAPI.connectionTestBody(model: model) }
+        model.modelID = "deepseek-v4.1-flash"; model.reasoningEffort = "medium"
+        #expect(throws: (any Error).self) { try ProviderAPI.connectionTestBody(model: model) }
+    }
+
+    @Test func connectionTestRequiresCompletedFinalText() throws {
+        try ProviderAPI.validateTestCompletion(["finish_reason": "stop", "message": ["content": "OK"]])
+        for choice: [String: Any] in [
+            ["finish_reason": "length", "message": ["content": "OK"]],
+            ["finish_reason": "stop", "message": ["content": "", "reasoning_content": "test-only internal thought"]],
+            ["finish_reason": "stop", "message": ["content": "   "]],
+            ["finish_reason": "content_filter", "message": ["content": "blocked"]]
+        ] {
+            #expect(throws: (any Error).self) { try ProviderAPI.validateTestCompletion(choice) }
+        }
+        #expect(throws: (any Error).self) { try ProviderAPI.validateTestCompletion(nil) }
+    }
+
     @Test func olderPreferencesRequestsAndNotesKeepTheirMeaning() throws {
         var prefs = AppPreferences()
         var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(prefs)) as! [String: Any]

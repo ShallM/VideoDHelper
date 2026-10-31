@@ -32,6 +32,7 @@ struct UsageDashboard: View {
     let preferences: AppPreferences
     @State private var period = "30"
     @State private var providerID = "all"
+    @State private var sourceFilter: UsageSourceFilter = .all
     @State private var search = ""
     @State private var grouping = "tasks"
     @State private var currentPrices = false
@@ -45,7 +46,7 @@ struct UsageDashboard: View {
     }
     private var events: [UsageEvent] {
         editor.snapshot.events.filter {
-            (since == nil || $0.timestamp >= since!.timeIntervalSince1970) &&
+            sourceFilter.includes($0) && (since == nil || $0.timestamp >= since!.timeIntervalSince1970) &&
             (providerID == "all" || ($0.providerID ?? "legacy") == providerID) &&
             (search.isEmpty || "\($0.displayTask) \($0.displayModel) \($0.displayProvider) \($0.modelID ?? "")".localizedCaseInsensitiveContains(search))
         }
@@ -76,11 +77,11 @@ struct UsageDashboard: View {
     }
     private var groups: [UsageGroup] {
         let grouped = Dictionary(grouping: events) { event in
-            grouping == "models" ? "\(event.providerID ?? "legacy")/\(event.modelID ?? "unknown")" : (event.taskID ?? "connection-test")
+            grouping == "models" ? "\(event.providerID ?? "legacy")/\(event.modelID ?? "unknown")" : (event.taskID ?? "unassociated/\(event.purpose)")
         }
         return grouped.map { key, rows in
             UsageGroup(id: key, title: grouping == "models" ? rows[0].displayModel : rows[0].displayTask,
-                       subtitle: grouping == "models" ? rows[0].displayProvider : "\(rows.count) 次请求",
+                       subtitle: grouping == "models" ? rows[0].displayProvider : "\(rows[0].sourceLabel) · \(rows.count) 次请求",
                        totals: UsageTotals(events: rows, preferences: preferences, currentPrices: currentPrices))
         }.sorted { ($0.totals.input + $0.totals.output) > ($1.totals.input + $1.totals.output) }
     }
@@ -98,7 +99,7 @@ struct UsageDashboard: View {
                     Text("旧版日志中的响应已纳入 Token 统计。由于当时未保存服务商、模型和单价，历史费用保持未知。").font(.caption).foregroundStyle(.secondary)
                 }
                 if events.isEmpty {
-                    ContentUnavailableView(search.isEmpty && providerID == "all" ? "这个时间段还没有请求" : "没有匹配的记录", systemImage: "chart.bar", description: Text("生成笔记或测试模型后，用量会出现在这里。"))
+                    ContentUnavailableView(search.isEmpty && providerID == "all" && sourceFilter == .all ? "这个时间段还没有请求" : "没有匹配的记录", systemImage: "chart.bar", description: Text("生成视频笔记、整理录音或测试模型后，用量会出现在这里。"))
                         .frame(maxWidth: .infinity).frame(height: 270)
                 } else {
                     trend
@@ -108,6 +109,7 @@ struct UsageDashboard: View {
             }.padding(.horizontal, 26).padding(.bottom, 24)
         }
         .onAppear { editor.refreshUsage() }
+        .onChange(of: sourceFilter) { _, _ in rowLimit = 100 }
         .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in editor.refreshUsage() }
         .sheet(item: $detail) { event in UsageDetailSheet(event: event, preferences: preferences, currentPrices: currentPrices) }
         .sheet(isPresented: $showsPricing) {
@@ -120,6 +122,13 @@ struct UsageDashboard: View {
 
     private var filters: some View {
         VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Text("用量来源").font(.caption).foregroundStyle(.secondary)
+                Picker("用量来源", selection: $sourceFilter) {
+                    ForEach(UsageSourceFilter.allCases) { source in Text(source.label).tag(source) }
+                }.labelsHidden().pickerStyle(.segmented).frame(width: 380)
+                Spacer()
+            }
             HStack(spacing: 12) {
                 Picker("时间范围", selection: $period) { Text("今天").tag("1"); Text("近 7 天").tag("7"); Text("近 30 天").tag("30"); Text("全部").tag("all") }.labelsHidden().frame(width: 130)
                 Picker("服务商筛选", selection: $providerID) {
@@ -246,7 +255,7 @@ struct UsageDashboard: View {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(event.displayModel).font(.callout.weight(.medium)).lineLimit(1)
-                        Text(event.phaseLabel).font(.caption2).foregroundStyle(.secondary)
+                        Text("\(event.sourceLabel) · \(event.phaseLabel) · 请求强度：\(event.requestedReasoningLabel)").font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                         Text("\(Date(timeIntervalSince1970: event.timestamp).formatted(date: .abbreviated, time: .standard)) · \(event.statusLabel)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     Text(tokenText(event.usage.inputTokens)).frame(width: 75, alignment: .trailing)
@@ -286,6 +295,11 @@ private struct UsageDetailSheet: View {
                         Text(event.displayModel).font(.headline)
                         Text("\(event.displayProvider) · \(Date(timeIntervalSince1970: event.timestamp).formatted(date: .complete, time: .standard))").font(.caption).foregroundStyle(.secondary)
                         Text(event.displayTask).font(.callout).lineLimit(3)
+                    }
+                    SettingsCard(title: "请求设置") {
+                        row("用量来源", event.sourceLabel)
+                        row("请求思考强度", event.requestedReasoningLabel)
+                        Text("记录本次请求的选项，不代表服务商已确认实际执行档位；历史未记录的设置保持未知。").font(.caption).foregroundStyle(.secondary)
                     }
                     SettingsCard(title: "服务商报告的用量") {
                         row("总结阶段", event.phaseLabel)

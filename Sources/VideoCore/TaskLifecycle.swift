@@ -4,17 +4,24 @@ import Darwin
 /// Uses the worker's advisory lock, not its last persisted state: a task marked
 /// "running" may simply have been interrupted before its final progress write.
 public enum TaskLifecycle {
-    public static func setArchived(_ archived: Bool, taskID: String, root: URL = AppStorage.root) throws -> TaskLibrary {
-        try withIdleTask(taskID, root: root) { _ in
-            var library = try TaskLibrary.load(from: root.appendingPathComponent("library.json"))
+    public static func editRecording(taskID: String, root: URL = AppStorage.root, operation: (URL) throws -> Void) throws {
+        try withIdleTask(taskID, root: root, workspace: .recording) { folder in
+            let library = try TaskLibrary.load(workspace: .recording, root: root)
+            guard !library.isArchived(taskID) else { throw VideoError.toolFailed("请先恢复已归档的录音任务。") }
+            try operation(folder)
+        }
+    }
+    public static func setArchived(_ archived: Bool, taskID: String, root: URL = AppStorage.root, workspace: WorkspaceKind = .bilibili) throws -> TaskLibrary {
+        try withIdleTask(taskID, root: root, workspace: workspace) { _ in
+            var library = try TaskLibrary.load(workspace: workspace, root: root)
             try library.setArchived(archived, taskID: taskID)
-            try library.save(to: root.appendingPathComponent("library.json"))
+            try library.save(to: TaskLibrary.fileURL(for: workspace, root: root))
             return library
         }
     }
 
-    public static func trash(taskID: String, root: URL = AppStorage.root) throws -> TaskLibrary {
-        try trash(taskID: taskID, root: root, moveToTrash: { folder in
+    public static func trash(taskID: String, root: URL = AppStorage.root, workspace: WorkspaceKind = .bilibili) throws -> TaskLibrary {
+        try trash(taskID: taskID, root: root, workspace: workspace, moveToTrash: { folder in
             var destination: NSURL?
             try FileManager.default.trashItem(at: folder, resultingItemURL: &destination)
             guard let destination else { throw VideoError.toolFailed("任务已移到废纸篓，但无法取得恢复位置。请刷新任务列表。") }
@@ -24,13 +31,13 @@ public enum TaskLifecycle {
 
     // The injected move lets tests verify failures and recovery without touching
     // the user's real Trash. Production always uses FileManager.trashItem.
-    static func trash(taskID: String, root: URL, moveToTrash: (URL) throws -> URL) throws -> TaskLibrary {
-        try withIdleTask(taskID, root: root) { folder in
-            let libraryURL = root.appendingPathComponent("library.json")
-            var library = try TaskLibrary.load(from: libraryURL)
+    static func trash(taskID: String, root: URL, workspace: WorkspaceKind = .bilibili, moveToTrash: (URL) throws -> URL) throws -> TaskLibrary {
+        try withIdleTask(taskID, root: root, workspace: workspace) { folder in
+            let libraryURL = TaskLibrary.fileURL(for: workspace, root: root)
+            var library = try TaskLibrary.load(workspace: workspace, root: root)
             // Fail before moving any files if the organization cannot be saved.
             try library.save(to: libraryURL)
-            try UsageRepository.preserveTaskHistory(taskID: taskID, root: root)
+            try UsageRepository.preserveTaskHistory(taskID: taskID, root: root, workspace: workspace)
             let destination = try moveToTrash(folder)
             library.forgetTask(taskID)
             do { try library.save(to: libraryURL) }
@@ -43,9 +50,9 @@ public enum TaskLifecycle {
         }
     }
 
-    private static func withIdleTask<T>(_ taskID: String, root: URL, operation: (URL) throws -> T) throws -> T {
+    private static func withIdleTask<T>(_ taskID: String, root: URL, workspace: WorkspaceKind, operation: (URL) throws -> T) throws -> T {
         guard UUID(uuidString: taskID) != nil else { throw VideoError.toolFailed("无效任务编号。") }
-        let folder = root.appendingPathComponent("tasks", isDirectory: true).appendingPathComponent(taskID, isDirectory: true)
+        let folder = root.appendingPathComponent(workspace.tasksDirectoryName, isDirectory: true).appendingPathComponent(taskID, isDirectory: true)
         let values = try folder.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard values.isDirectory == true, values.isSymbolicLink != true else {
             throw VideoError.toolFailed("任务目录无效，未修改任何任务文件。")
@@ -66,6 +73,7 @@ public enum TaskLifecycle {
         }
         let job = try AppStorage.read(ProcessingJob.self, from: folder.appendingPathComponent("job.json"))
         guard job.id == taskID else { throw VideoError.toolFailed("任务目录与记录不匹配。") }
+        guard job.workspace == workspace else { throw VideoError.toolFailed("任务不属于当前功能页，未修改任何文件。") }
         return try operation(folder)
     }
 }

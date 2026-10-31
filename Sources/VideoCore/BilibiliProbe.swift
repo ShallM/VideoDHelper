@@ -189,6 +189,8 @@ enum ProcessRunner {
         })
         observer.cancel()
         await observer.value
+        // A short-lived worker may exit before the polling observer reads its final event.
+        if let data = try? reader.readToEnd(), !data.isEmpty { onOutput?(data) }
         try Task.checkCancellation()
         guard status == 0 else {
             let diagnostic = (try? String(contentsOf: stderrURL, encoding: .utf8)) ?? ""

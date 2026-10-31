@@ -5,12 +5,14 @@ public struct TranscriptSegment: Codable, Identifiable, Equatable, Sendable {
     public let start: Double
     public let end: Double
     public let text: String
+    public var speaker: String?
 
-    public init(id: Int, start: Double, end: Double, text: String) {
+    public init(id: Int, start: Double, end: Double, text: String, speaker: String? = nil) {
         self.id = id
         self.start = start
         self.end = end
         self.text = text
+        self.speaker = speaker
     }
 }
 

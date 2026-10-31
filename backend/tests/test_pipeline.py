@@ -1,4 +1,5 @@
 import copy
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,6 @@ from summary import (ChatClient, CHUNK_PROMPT, OVERVIEW_PROMPT, REDUCE_PROMPT, M
                      batches, encoded, summarize, validate_chunk, validate_overview, ordered_parallel, stitch_notes,
                      outline_items, expand_note)
 from worker import run
-from local_models import ready
 
 
 def segments(count=12):
@@ -168,22 +168,17 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result['key_points'][0]['source_ids'], list(range(300)))
         self.assertTrue(any(prompt == REDUCE_PROMPT for prompt, _ in FakeClient.seen))
 
-    def test_local_model_is_reused_without_downloading(self):
-        directory = self.root / 'models/turbo'
-        write_json(directory / 'config.json', {})
-        with (directory / 'weights.safetensors').open('wb') as file:
-            file.truncate(2_000_000)
-        self.assertTrue(ready(directory))
-        with patch('media.existing_checkpoint', side_effect=AssertionError('must reuse converted weights')):
-            from media import prepare_model
-            self.assertEqual(prepare_model('turbo', self.root, lambda *a: None), str(directory))
-
-    def test_available_pt_checkpoint_is_converted_before_network_download(self):
+    def test_model_lookup_uses_manager_and_does_not_implicitly_download(self):
         from media import prepare_model
-        checkpoint = self.root / 'large-v3-turbo.pt'
-        with patch('media.existing_checkpoint', return_value=checkpoint), patch('media.convert_checkpoint', return_value='converted') as convert:
-            self.assertEqual(prepare_model('turbo', self.root, lambda *a: None), 'converted')
-            self.assertEqual(convert.call_args.args[:3], ('turbo', checkpoint, self.root / 'models/turbo'))
+        with patch('asr_models.acquire_model', return_value=contextlib.nullcontext({'paths': {'asr': '/managed/turbo'}})) as acquire:
+            self.assertEqual(prepare_model('turbo', self.root, lambda *a: None), '/managed/turbo')
+            self.assertEqual(acquire.call_args.args, (self.root, 'turbo'))
+
+    def test_missing_model_is_not_converted_or_downloaded_from_transcription(self):
+        from media import prepare_model
+        with patch('asr_models.acquire_model', side_effect=UserError('请下载')):
+            with self.assertRaisesRegex(UserError, '请下载'):
+                prepare_model('turbo', self.root, lambda *a: None)
 
     def test_nonfinite_times_and_empty_speech_are_rejected(self):
         for values in ([], [{'id': 0, 'start': float('nan'), 'end': 2, 'text': 'x'}],

@@ -41,6 +41,7 @@ struct SettingsRow<Content: View>: View {
 
 struct SettingsView: View {
     @ObservedObject var store: PreferencesStore
+    @ObservedObject private var speechModels = ASRModelStore.shared
     @StateObject private var editor: PreferencesEditor
     @State private var showsProviderEditor = false
     @State private var modelEditor: ModelEditorContext?
@@ -60,7 +61,7 @@ struct SettingsView: View {
                         Text(pageDescription).font(.callout).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if editor.isDirty { Text("未保存更改").font(.caption.weight(.medium)).padding(.horizontal, 10).padding(.vertical, 6).background(.orange.opacity(0.12), in: Capsule()).foregroundStyle(.orange) }
+                    if editor.isDirty { Text(store.page == .speech ? "其他设置未保存" : "未保存更改").font(.caption.weight(.medium)).padding(.horizontal, 10).padding(.vertical, 6).background(.orange.opacity(0.12), in: Capsule()).foregroundStyle(.orange) }
                 }.padding(26)
                 if let error = store.loadError { feedback(error, error: true) }
                 if let message = editor.feedback { feedback(message, error: editor.feedbackIsError) }
@@ -71,18 +72,21 @@ struct SettingsView: View {
                 Group {
                     switch store.page {
                     case .general: generalPage
+                    case .speech: ASRSettingsView(preferences: store, editor: editor)
                     case .models: modelsPage
                     case .usage: UsageDashboard(editor: editor, preferences: store.value)
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
                 HStack {
-                    Text(editor.isDirty ? "保存后应用新设置；当前运行保持原配置。" : "设置保存在本机。API Key 使用私有文件权限保存。")
+                    Text(store.page == .speech ? "模型操作立即生效；下载不会改变默认选择，其他设置草稿保持不变。" : (editor.isDirty ? "保存后应用新设置；当前运行保持原配置。" : "设置保存在本机。API Key 使用私有文件权限保存。"))
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("撤销更改", action: editor.resetDraft).disabled(!editor.isDirty || editor.isConnecting)
-                    Button("保存设置", action: editor.save).buttonStyle(.borderedProminent).tint(.teal)
-                        .keyboardShortcut("s", modifiers: .command).disabled(!editor.isDirty || !store.writable || editor.isConnecting)
+                    if store.page != .speech {
+                        Button("撤销更改", action: editor.resetDraft).disabled(!editor.isDirty || editor.isConnecting)
+                        Button("保存设置", action: editor.save).buttonStyle(.borderedProminent).tint(.teal)
+                            .keyboardShortcut("s", modifiers: .command).disabled(!editor.isDirty || !store.writable || editor.isConnecting)
+                    }
                 }.padding(18)
             }.background(Color(nsColor: .windowBackgroundColor))
         }.frame(minWidth: 1040, idealWidth: 1160, minHeight: 740, idealHeight: 820)
@@ -106,6 +110,7 @@ struct SettingsView: View {
             .onChange(of: store.page) { _, page in if page == .usage { editor.refreshUsage() } }
             .onChange(of: editor.selectedProviderID) { _, _ in showsKey = false; editor.feedback = nil }
             .onAppear { if store.page == .usage { editor.refreshUsage() } }
+            .onReceive(NotificationCenter.default.publisher(for: .videoPreferencesChanged)) { _ in editor.syncImmediateASRSettings() }
             .onDisappear { editor.cancelConnection() }
     }
 
@@ -135,6 +140,7 @@ struct SettingsView: View {
     private var pageDescription: String {
         switch store.page {
         case .general: return "为新任务选择默认处理方式，调整阅读与本机存储。"
+        case .speech: return "下载与管理本地转录模型，供 B 站视频和录音整理共用。"
         case .models: return "管理服务商、可用模型和价格，让每次调用都有清晰归属。"
         case .usage: return "查看实际请求用量，按价格表估算费用。"
         }
@@ -154,11 +160,14 @@ struct SettingsView: View {
             VStack(spacing: 18) {
                 SettingsCard(title: "新任务默认值", subtitle: "每个视频仍可单独调整。", icon: "play.square.stack") {
                     SettingsRow(title: "文字来源", detail: "优先字幕通常更快；无字幕时本机转录。") {
-                        Picker("默认文字来源", selection: $editor.draft.general.transcriptionMode) { Text("优先平台字幕").tag("auto"); Text("强制本地 Whisper").tag("whisper") }.labelsHidden()
+                        Picker("默认文字来源", selection: $editor.draft.general.transcriptionMode) { Text("优先平台字幕").tag("auto"); Text("强制本地转录").tag("whisper") }.labelsHidden()
                     }
                     Divider()
-                    SettingsRow(title: "本地转录模型", detail: "优先复用已有权重，使用 MLX / Metal 加速。") {
-                        Picker("默认转录模型", selection: $editor.draft.general.whisperModel) { Text("Large v3 Turbo · 更高质量").tag("turbo"); Text("Small · 较小模型").tag("small") }.labelsHidden()
+                    SettingsRow(title: "本地转录模型", detail: "B 站与录音的新任务共用默认值，也可单次选择。") {
+                        VStack(alignment: .trailing, spacing: 5) {
+                            Text(speechModels.name(store.value.general.effectiveASRModelID)).font(.callout)
+                            Button("管理语音转文字模型") { store.page = .speech }.buttonStyle(.link)
+                        }
                     }
                     Divider()
                     SettingsRow(title: "媒体获取") {
@@ -199,7 +208,7 @@ struct SettingsView: View {
                         Button("登录或更新会话") { showsLogin = true }
                     }
                 }
-                HStack { Button("恢复通用默认值") { editor.draft.general = GeneralPreferences() }.buttonStyle(.link); Spacer() }
+                HStack { Button("恢复通用默认值", action: editor.restoreGeneralDefaults).buttonStyle(.link); Spacer() }
             }.padding(.horizontal, 26).padding(.bottom, 26).disabled(!store.writable)
         }
     }
@@ -269,7 +278,7 @@ struct SettingsView: View {
                 ForEach(provider.models) { model in
                     modelCard(model, provider: provider)
                 }
-                Text("测试会发起一次简短模型调用，并计入用量。价格按每百万 Tokens 填写；未配置时仅统计用量。").font(.caption).foregroundStyle(.secondary).lineSpacing(3)
+                Text("测试会发起一次模型调用，并计入用量；较高思考强度可能消耗更多输出 Tokens。测试通过表示请求被接收，不保证服务商后台执行了对应强度。").font(.caption).foregroundStyle(.secondary).lineSpacing(3)
                 if provider.id != editor.draft.defaultProviderID {
                     Button("移除此服务商…", role: .destructive) { removingProvider = provider }.buttonStyle(.link).padding(.top, 6)
                 }
@@ -283,6 +292,17 @@ struct SettingsView: View {
                 Spacer()
                 if model.id == editor.draft.defaultModelID { Text("默认").font(.caption.weight(.medium)).foregroundStyle(.teal).padding(.horizontal, 9).padding(.vertical, 4).background(.teal.opacity(0.1), in: Capsule()) }
             }
+            HStack {
+                Label("思考强度", systemImage: "brain").font(.caption).foregroundStyle(.secondary)
+                Picker("\(model.name) 的思考强度", selection: Binding(get: { model.reasoningEffort }, set: { effort in
+                    guard let p = editor.draft.providers.firstIndex(where: { $0.id == provider.id }),
+                          let m = editor.draft.providers[p].models.firstIndex(where: { $0.id == model.id }) else { return }
+                    editor.draft.providers[p].models[m].reasoningEffort = effort
+                })) {
+                    ForEach(ReasoningEffort.options(for: model.modelID)) { effort in Text(effort.label).tag(effort.rawValue) }
+                }.labelsHidden().frame(width: 145)
+                Spacer()
+            }.controlSize(.small)
             HStack {
                 Label(model.pricing.isConfigured ? "\(model.pricing.currency) · 已配置单价" : "未配置价格", systemImage: "tag").font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -371,8 +391,21 @@ struct ModelEditorSheet: View {
             Form {
                 TextField("模型 ID", text: $draft.modelID)
                 TextField("显示名称", text: $draft.name)
-                Picker("推理强度", selection: $draft.reasoningEffort) { Text("低 · 适合内容整理").tag("low"); Text("服务商默认 · 兼容模式").tag("default") }
+                Picker("思考强度", selection: $draft.reasoningEffort) {
+                    ForEach(ReasoningEffort.options(for: draft.modelID)) { effort in
+                        Text(effort == .providerDefault ? effort.label : "\(effort.label) · \(effort.rawValue)").tag(effort.rawValue)
+                    }
+                    if !ReasoningEffort.options(for: draft.modelID).contains(where: { $0.rawValue == draft.reasoningEffort }) {
+                        Text("\(draft.reasoningEffortLabel) · 请重新选择").tag(draft.reasoningEffort)
+                    }
+                }
             }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(ReasoningEffort(rawValue: draft.reasoningEffort)?.detail ?? "请重新选择思考强度。")
+                Text(ReasoningEffort.isDeepSeekV4(draft.modelID)
+                     ? "DeepSeek V4 官方档位为低、高、最高；中档会映射为高。通过代理调用时，仍需核对服务商支持情况。"
+                     : "这是 OpenAI 兼容接口的请求选项，并非已验证的模型能力。不支持时会明确报错，可自行改用服务商默认。")
+            }.font(.caption).foregroundStyle(.secondary).lineSpacing(3)
             SettingsCard(title: "价格表", subtitle: "每百万 Tokens 的单价。留空为未配置，填 0 表示免费。", icon: "tag") {
                 HStack { Text("币种").font(.callout); Spacer(); Picker("计费币种", selection: $draft.pricing.currency) { Text("人民币 CNY").tag("CNY"); Text("美元 USD").tag("USD"); Text("欧元 EUR").tag("EUR"); Text("港币 HKD").tag("HKD"); Text("日元 JPY").tag("JPY") }.labelsHidden().frame(width: 180) }
                 HStack(spacing: 16) { priceField("输入", text: $inputPrice, placeholder: "未配置"); priceField("输出", text: $outputPrice, placeholder: "未配置") }
@@ -393,6 +426,7 @@ struct ModelEditorSheet: View {
             model.name = model.name.trimmingCharacters(in: .whitespacesAndNewlines)
             if model.name.isEmpty { model.name = model.modelID }
             guard !model.modelID.isEmpty, model.modelID.count <= 200, model.name.count <= 100, !otherIDs.contains(model.modelID) else { throw VideoError.toolFailed("请输入不重复的模型 ID（最多 200 字符），名称最多 100 字符。") }
+            _ = try ReasoningEffort.validated(model.reasoningEffort, modelID: model.modelID)
             model.pricing = try TokenPricing.fromInput(currency: model.pricing.currency, input: inputPrice, output: outputPrice, cached: cachedPrice)
             onSave(model); dismiss()
         } catch { self.error = error.localizedDescription }

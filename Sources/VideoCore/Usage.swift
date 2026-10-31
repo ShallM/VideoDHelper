@@ -58,6 +58,10 @@ public struct UsageEvent: Codable, Identifiable, Sendable {
     public var timestamp: Double
     public var taskID: String?
     public var taskTitle: String?
+    /// Stored on the event so task deletion cannot change the accounting scope.
+    public var sourceKind: String?
+    /// The requested parameter, not a claim about the provider's execution.
+    public var reasoningEffort: String?
     public var providerID: String?
     public var providerName: String?
     public var modelConfigID: String?
@@ -76,12 +80,44 @@ public struct UsageEvent: Codable, Identifiable, Sendable {
         self.id = id; self.timestamp = timestamp; self.purpose = purpose; status = "in_flight"; usage = TokenUsage()
         providerID = provider?.id; providerName = provider?.name
         modelConfigID = model?.id; modelID = model?.modelID; modelName = model?.name; pricing = model?.pricing
+        reasoningEffort = model?.reasoningEffort
     }
     public var displayModel: String { modelName ?? modelID ?? "历史未记录模型" }
     public var displayProvider: String { providerName ?? "历史未归属" }
     public var displayTask: String { taskTitle ?? (purpose == "connection-test" ? "模型连接测试" : "已移除的任务") }
+    public var resolvedSourceKind: String? {
+        guard purpose != "connection-test" else { return nil }
+        if let sourceKind { return ["bilibili", "recording"].contains(sourceKind) ? sourceKind : nil }
+        // Before workspaces existed every task was a video task. Do not infer a
+        // source for unassociated calls, or consult today's mutable task list.
+        return taskID == nil ? nil : "bilibili"
+    }
+    public var sourceLabel: String {
+        if purpose == "connection-test" { return "连接测试" }
+        switch resolvedSourceKind {
+        case "bilibili": return "B站视频"
+        case "recording": return "录音整理"
+        default: return "来源未记录"
+        }
+    }
+    public var requestedReasoningLabel: String {
+        guard let reasoningEffort else { return "历史未记录" }
+        if reasoningEffort == "default" { return "服务商默认（未传参数）" }
+        return ReasoningEffort(rawValue: reasoningEffort)?.label ?? "未知档位"
+    }
     public var phaseLabel: String {
         switch phase {
+        case "meeting_draft": return "会议纪要草稿"
+        case "meeting_merge": return "长纪要分层合并"
+        case "meeting_evidence": return "独立关键证据检查"
+        case "meeting_review": return "纪要对照核验"
+        case "meeting_reread": return "纪要定向回读"
+        case "meeting_punctuation": return "原话断句与标点"
+        case "dialogue_summary": return "对话全文理解"
+        case "dialogue_merge": return "对话分层综合"
+        case "dialogue_condense": return "独立整理原话"
+        case "dialogue_review": return "对照原文复核"
+        case "dialogue_reread": return "对话定向回读"
         case "whole": return "短稿整体阅读"
         case "plan", "plan_merge": return "全文结构"
         case "chapter": return "主题笔记"
@@ -121,6 +157,26 @@ public struct UsageEvent: Codable, Identifiable, Sendable {
     }
 }
 
+public enum UsageSourceFilter: String, CaseIterable, Identifiable, Sendable {
+    case all, bilibili, recording, connectionTests
+    public var id: String { rawValue }
+    public var label: String {
+        switch self {
+        case .all: return "全部"
+        case .bilibili: return "B站视频"
+        case .recording: return "录音整理"
+        case .connectionTests: return "连接测试"
+        }
+    }
+    public func includes(_ event: UsageEvent) -> Bool {
+        switch self {
+        case .all: return true
+        case .connectionTests: return event.purpose == "connection-test"
+        case .bilibili, .recording: return event.resolvedSourceKind == rawValue
+        }
+    }
+}
+
 public struct UsageSnapshot: Sendable {
     public var events: [UsageEvent] = []
     public var unreadableRecords = 0
@@ -130,7 +186,9 @@ public struct UsageSnapshot: Sendable {
 public enum UsageRepository {
     public static func save(_ event: UsageEvent, root: URL = AppStorage.root) throws {
         guard UUID(uuidString: event.id) != nil else { throw VideoError.toolFailed("无效用量记录。") }
-        try AppStorage.write(event, to: root.appendingPathComponent("usage/events/\(event.id).json"))
+        var saved = event
+        if saved.sourceKind == nil { saved.sourceKind = saved.resolvedSourceKind }
+        try AppStorage.write(saved, to: root.appendingPathComponent("usage/events/\(event.id).json"))
     }
     public static func load(root: URL = AppStorage.root) -> UsageSnapshot {
         var snapshot = UsageSnapshot(), seen = Set<String>()
@@ -155,12 +213,14 @@ public enum UsageRepository {
                 snapshot.events += events.filter { seen.insert($0.id).inserted }
             } catch { snapshot.unreadableRecords += 1 }
         }
-        let jobs = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("tasks"), includingPropertiesForKeys: nil)) ?? []
-        for folder in jobs where UUID(uuidString: folder.lastPathComponent) != nil {
-            if let job = try? AppStorage.read(ProcessingJob.self, from: folder.appendingPathComponent("job.json")) { titles[folder.lastPathComponent] = job.title }
-            let legacy = legacyHistory(in: folder)
-            snapshot.unreadableRecords += legacy.unreadableRecords
-            snapshot.events += legacy.events.filter { seen.insert($0.id).inserted }
+        for workspace in WorkspaceKind.allCases {
+            let jobs = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent(workspace.tasksDirectoryName), includingPropertiesForKeys: nil)) ?? []
+            for folder in jobs where UUID(uuidString: folder.lastPathComponent) != nil {
+                if let job = try? AppStorage.read(ProcessingJob.self, from: folder.appendingPathComponent("job.json")) { titles[folder.lastPathComponent] = job.title }
+                let legacy = legacyHistory(in: folder, workspace: workspace)
+                snapshot.unreadableRecords += legacy.unreadableRecords
+                snapshot.events += legacy.events.filter { seen.insert($0.id).inserted }
+            }
         }
         for index in snapshot.events.indices {
             if let taskID = snapshot.events[index].taskID { snapshot.events[index].taskTitle = titles[taskID] ?? snapshot.events[index].taskTitle }
@@ -169,9 +229,9 @@ public enum UsageRepository {
         return snapshot
     }
 
-    static func preserveTaskHistory(taskID: String, root: URL) throws {
-        let folder = root.appendingPathComponent("tasks/\(taskID)")
-        let legacy = legacyHistory(in: folder)
+    static func preserveTaskHistory(taskID: String, root: URL, workspace: WorkspaceKind = .bilibili) throws {
+        let folder = root.appendingPathComponent(workspace.tasksDirectoryName).appendingPathComponent(taskID)
+        let legacy = legacyHistory(in: folder, workspace: workspace)
         guard legacy.unreadableRecords == 0 else {
             throw VideoError.toolFailed("任务的旧版用量记录无法完整读取，暂未删除。可先归档任务，保留原始记录。")
         }
@@ -187,11 +247,14 @@ public enum UsageRepository {
         let job = try AppStorage.read(ProcessingJob.self, from: folder.appendingPathComponent("job.json"))
         var seen = Set(saved.map(\.id))
         for event in modern + legacy.events where seen.insert(event.id).inserted { saved.append(event) }
-        for index in saved.indices { saved[index].taskTitle = job.title }
+        for index in saved.indices {
+            saved[index].taskTitle = job.title
+            if saved[index].sourceKind == nil { saved[index].sourceKind = saved[index].resolvedSourceKind }
+        }
         try AppStorage.write(saved, to: path)
     }
 
-    private static func legacyHistory(in folder: URL) -> UsageSnapshot {
+    private static func legacyHistory(in folder: URL, workspace: WorkspaceKind) -> UsageSnapshot {
         var snapshot = UsageSnapshot()
         let path = folder.appendingPathComponent("checkpoints/summary/usage.jsonl")
         guard FileManager.default.fileExists(atPath: path.path) else { return snapshot }
@@ -209,6 +272,9 @@ public enum UsageRepository {
                 event.taskID = folder.lastPathComponent; event.status = "response"
                 event.usage = TokenUsage(response: raw["usage"] as? [String: Any] ?? [:])
                 event.finishReason = raw["finish_reason"] as? String
+                event.sourceKind = raw["sourceKind"] as? String ?? workspace.rawValue
+                event.reasoningEffort = raw["reasoningEffort"] as? String
+                event.phase = raw["phase"] as? String
                 // Never infer a legacy request's model or price from current settings.
                 event.providerID = raw["providerID"] as? String; event.providerName = raw["providerName"] as? String
                 event.modelConfigID = raw["modelConfigID"] as? String; event.modelID = raw["modelID"] as? String
@@ -228,7 +294,7 @@ public enum UsageRepository {
             return "\"" + protected.replacingOccurrences(of: "\"", with: "\"\"") + "\""
         }
         let formatter = ISO8601DateFormatter()
-        var rows = [["时间", "任务", "服务商", "模型ID", "输入Token", "输出Token", "缓存输入Token", "推理Token（含于输出）", "总Token", "币种", "估算费用", "状态", "计价方式", "总结阶段"]]
+        var rows = [["时间", "任务", "服务商", "模型ID", "输入Token", "输出Token", "缓存输入Token", "推理Token（含于输出）", "总Token", "币种", "估算费用", "状态", "计价方式", "总结阶段", "用量来源", "请求思考强度"]]
         rows += events.map { event in
             let price = event.price(in: preferences, current: currentPrices)
             return [formatter.string(from: Date(timeIntervalSince1970: event.timestamp)), event.displayTask, event.displayProvider,
@@ -236,7 +302,8 @@ public enum UsageRepository {
                     event.usage.cachedInputTokens.map(String.init) ?? "", event.usage.reasoningTokens.map(String.init) ?? "",
                     event.usage.totalTokens.map(String.init) ?? "", price?.currency ?? "",
                     event.cost(in: preferences, current: currentPrices).map { String(format: "%.8f", locale: Locale(identifier: "en_US_POSIX"), $0) } ?? "",
-                    event.statusLabel, currentPrices ? "当前价格预估" : "调用时价格快照", event.phaseLabel]
+                    event.statusLabel, currentPrices ? "当前价格预估" : "调用时价格快照", event.phaseLabel,
+                    event.sourceLabel, event.requestedReasoningLabel]
         }
         return "\u{FEFF}" + rows.map { $0.map(field).joined(separator: ",") }.joined(separator: "\r\n") + "\r\n"
     }

@@ -4,10 +4,10 @@ import VideoCore
 extension Notification.Name { static let videoPreferencesChanged = Notification.Name("VideoDHelper.preferencesChanged") }
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, models, usage
+    case general, speech, models, usage
     var id: String { rawValue }
-    var title: String { switch self { case .general: return "通用"; case .models: return "模型服务"; case .usage: return "用量与费用" } }
-    var icon: String { switch self { case .general: return "slider.horizontal.3"; case .models: return "cpu"; case .usage: return "chart.bar.xaxis" } }
+    var title: String { switch self { case .general: return "通用"; case .speech: return "语音转文字"; case .models: return "大语言模型"; case .usage: return "用量与费用" } }
+    var icon: String { switch self { case .general: return "slider.horizontal.3"; case .speech: return "waveform"; case .models: return "cpu"; case .usage: return "chart.bar.xaxis" } }
 }
 
 @MainActor
@@ -21,8 +21,9 @@ final class PreferencesStore: ObservableObject {
     }
     init() {
         do {
-            let loaded = try AppPreferences.load()
-            if !FileManager.default.fileExists(atPath: AppPreferences.fileURL.path) { try loaded.save() }
+            var loaded = try AppPreferences.load()
+            let migrated = loaded.migrateASRPreferences()
+            if migrated || !FileManager.default.fileExists(atPath: AppPreferences.fileURL.path) { try loaded.save() }
             value = loaded
         } catch {
             value = AppPreferences()
@@ -64,6 +65,30 @@ final class PreferencesEditor: ObservableObject {
         catch { show(error.localizedDescription, error: true) }
     }
     func resetDraft() { draft = store.value; selectedProviderID = draft.defaultProviderID; feedback = nil }
+    func makeDefaultASR(_ id: String) {
+        do {
+            var saved = store.value
+            try saved.setDefaultASRModel(id)
+            try store.save(saved)
+            draft.mergeASRPreferences(from: store.value)
+            show("已设为新任务默认转录模型。已开始的任务保持原模型。")
+        } catch { show(error.localizedDescription, error: true) }
+    }
+    func dismissASRMigrationNotice() {
+        do {
+            var saved = store.value
+            saved.general.asrLegacyNoticePending = false
+            try store.save(saved)
+            draft.mergeASRPreferences(from: store.value)
+        } catch { show(error.localizedDescription, error: true) }
+    }
+    func syncImmediateASRSettings() { draft.mergeASRPreferences(from: store.value) }
+    func restoreGeneralDefaults() {
+        var general = GeneralPreferences()
+        general.defaultASRModelID = store.value.general.defaultASRModelID
+        general.asrLegacyNoticePending = store.value.general.asrLegacyNoticePending
+        draft.general = general
+    }
     func savePrices(_ changes: [ModelPriceChange]) throws {
         var saved = store.value
         for change in changes {

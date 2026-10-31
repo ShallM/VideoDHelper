@@ -39,9 +39,33 @@ class OutputLimit(Exception):
     pass
 
 
+class InputContextLimit(OutputLimit):
+    """Provider rejected the combined context before returning a completion."""
+
+
+class ResponseOutputLimit(OutputLimit):
+    """A completion was returned but its final content was truncated."""
+
+
+class ReasoningOutputExhausted(UserError):
+    """No final answer, or legacy limit evidence too weak for safe splitting."""
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def reasoning_effort(config):
+    """Validate a requested strength without silently dropping or remapping it."""
+    value = config.get("reasoningEffort", "low")
+    if not isinstance(value, str) or value not in ("default", "low", "medium", "high", "max"):
+        raise UserError("思考强度无效，请在模型配置中重新选择。")
+    model = config.get("model", "").lower()
+    deepseek_v4 = "deepseek" in model and ("v4" in model or model.endswith("deepseek-flash"))
+    if deepseek_v4 and value == "medium":
+        raise UserError("DeepSeek V4 没有独立的中档；请明确选择低、高、最高或服务商默认。")
+    return value
 
 
 class ChatClient:
@@ -55,6 +79,7 @@ class ChatClient:
             raise UserError("原稿已保存。请在设置中填写 API Key，再点继续处理。")
         if not config.get("model", "").strip():
             raise UserError("请在设置中填写模型名称。")
+        self.reasoning_effort = reasoning_effort(config)
         self.endpoint = config["baseURL"].rstrip("/") + "/chat/completions"
         self.total_tokens = 0
         self.usage_lock = threading.Lock()
@@ -65,6 +90,7 @@ class ChatClient:
         self.limit_hits = 0
         self.calls = []
         self.known_output_limits = set()
+        self.known_limit_kinds = {}
         previous_usage = self.directory / "usage.jsonl"
         if previous_usage.exists() and previous_usage.stat().st_size <= 16 * 1024 * 1024:
             # Recover limits recorded before a process could persist the marker,
@@ -75,16 +101,31 @@ class ChatClient:
                 try:
                     entry = json.loads(line)
                     if isinstance(entry, dict) and isinstance(entry.get("step"), str):
-                        latest[entry["step"]] = entry.get("finish_reason")
+                        latest[entry["step"]] = entry
                 except (ValueError, TypeError):
                     continue
-            self.known_output_limits = {step for step, reason in latest.items() if reason == "length"}
+            self.known_output_limits = {step for step, entry in latest.items() if entry.get("finish_reason") == "length"}
+            for step in self.known_output_limits:
+                entry = latest[step]
+                kind = entry.get("limitKind")
+                if kind in ("no_final_output", "output_limit"):
+                    self.known_limit_kinds[step] = kind
+                elif type(entry.get("noFinalOutput")) is bool:
+                    self.known_limit_kinds[step] = "no_final_output" if entry["noFinalOutput"] else "output_limit"
+
+    def prepare_validation_retry(self, body, feedback, candidate, phase):
+        # Preserve historical video/v2 retry behavior. Specialized workflows can
+        # carry the rejected candidate without changing these callers' prompts.
+        body["messages"][0]["content"] += " 上次结构或来源检查未通过，请严格满足JSON字段及来源编号约束。" + feedback
+        return body
 
     def complete(self, prompt, payload, validator, output_tokens=8192, phase=None):
         identity = {"version": self.config.get("summaryVersion", VERSION), "base": self.endpoint, "model": self.config["model"],
-                    "effort": self.config.get("reasoningEffort", "low"), "prompt": prompt, "payload": payload}
+                    "effort": self.reasoning_effort, "prompt": prompt, "payload": payload}
         if self.config.get("summaryVersion"):
             identity["output_tokens"] = output_tokens
+        if self.config.get("jsonObjectMode") is True:
+            identity["responseFormat"] = "json_object"
         phase = phase or ("chunk" if prompt.startswith(CHUNK_PROMPT) else "reduce" if prompt.startswith(REDUCE_PROMPT) else "stitch" if prompt.startswith(MERGE_PROMPT) else "overview")
         path = self.directory / (digest(identity) + ".json")
         limit_path = self.directory / "limits" / path.name
@@ -98,21 +139,34 @@ class ChatClient:
                 return value
             except (ValueError, KeyError, TypeError):
                 path.unlink()
-        if (self.config.get("summaryVersion") and limit_path.exists()) or path.stem in self.known_output_limits:
+        # A completed marker is authoritative. The usage log also records the
+        # classification before marker persistence, closing the cancellation gap.
+        marker_kind = read_json(limit_path).get("kind") if limit_path.exists() else None
+        cached_kind = marker_kind if marker_kind in ("no_final_output", "output_limit", "provider_context_limit") else self.known_limit_kinds.get(path.stem)
+        if cached_kind == "no_final_output":
+            with self.usage_lock:
+                self.limit_hits += 1
+                self.calls.append({"phase": phase, "checkpoint": path.stem, "limitCached": True})
+            raise ReasoningOutputExhausted("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
+        if cached_kind is not None or path.stem in self.known_output_limits:
             # A resumable fallback must not pay for the same known-too-small
             # output budget again before reaching its successful checkpoint.
             with self.usage_lock:
                 self.limit_hits += 1
                 self.calls.append({"phase": phase, "checkpoint": path.stem, "limitCached": True})
-            raise OutputLimit()
-        feedback = ""
+            if cached_kind is None and str(self.config.get("summaryVersion", "")).startswith(("dialogue-reader-", "meeting-reader-")):
+                raise ReasoningOutputExhausted("历史记录显示输出额度耗尽，但中断前未记录结果类型，无法确认是否包含正文。已保留原稿和用量，保守停止自动拆分；请检查模型预算后继续。")
+            raise InputContextLimit() if cached_kind == "provider_context_limit" else ResponseOutputLimit()
+        feedback, candidate = "", ""
         for validation_attempt in range(2):
             body = {"model": self.config["model"], "stream": False, "max_tokens": output_tokens,
                     "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": encoded(payload)}]}
-            if self.config.get("reasoningEffort", "low") == "low":
-                body["reasoning_effort"] = "low"
+            if self.reasoning_effort != "default":
+                body["reasoning_effort"] = self.reasoning_effort
+            if self.config.get("jsonObjectMode") is True:
+                body["response_format"] = {"type": "json_object"}
             if validation_attempt:
-                body["messages"][0]["content"] += " 上次结构或来源检查未通过，请严格满足JSON字段及来源编号约束。" + feedback
+                body = self.prepare_validation_retry(body, feedback, candidate, phase)
             started = time.monotonic()
             try:
                 result = self._request(body, phase=phase)
@@ -124,6 +178,10 @@ class ChatClient:
             normalized_usage = normalize_usage(result.get("usage"))
             choices = result.get("choices") or []
             choice = choices[0] if choices else {}
+            message = choice.get("message") or {}
+            final_text = message.get("content") if isinstance(message, dict) else None
+            empty_final = final_text is None or (isinstance(final_text, str) and not final_text.strip())
+            limit_kind = ("no_final_output" if empty_final else "output_limit") if choice.get("finish_reason") == "length" else None
             # Record metering, not keys, headers or reasoning text.
             log = self.directory / "usage.jsonl"
             log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -132,34 +190,54 @@ class ChatClient:
                     self.total_tokens += normalized_usage.get("reportedTotalTokens", normalized_usage.get("inputTokens", 0) + normalized_usage.get("outputTokens", 0))
                 with log.open("a", encoding="utf-8") as file:
                     entry = {"time": time.time(), "step": path.stem, "usage": usage,
-                             "finish_reason": choice.get("finish_reason"), "modelID": self.config["model"],
+                             "finish_reason": choice.get("finish_reason"), "modelID": self.config["model"], "reasoningEffort": self.reasoning_effort,
                              "phase": phase, "durationSeconds": round(time.monotonic() - started, 3)}
+                    if limit_kind:
+                        entry.update(limitKind=limit_kind, noFinalOutput=empty_final)
                     if result.get("_videohelper_event_id"):
                         entry["eventID"] = result["_videohelper_event_id"]
                     for key in ("providerID", "providerName", "modelConfigID", "modelName", "pricing"):
                         if key in self.config:
                             entry[key] = self.config[key]
+                    source = self.config.get("sourceKind")
+                    if source is not None:
+                        entry["sourceKind"] = source if source in ("bilibili", "recording") else "unknown"
+                    elif self.config.get("taskID"):
+                        entry["sourceKind"] = "bilibili"
                     file.write(encoded(entry) + "\n")
-                self.calls.append({"phase": phase, "checkpoint": path.stem, "cached": False,
+                if limit_kind:
+                    self.known_output_limits.add(path.stem)
+                    self.known_limit_kinds[path.stem] = limit_kind
+                self.calls.append({"phase": phase, "checkpoint": path.stem, "cached": False, "reasoningEffort": self.reasoning_effort,
                                    "usage": normalized_usage, "durationSeconds": entry["durationSeconds"]})
             if not choices:
                 raise UserError("模型没有返回结果。原稿和已完成分段已保存。")
             if choice.get("finish_reason") == "length":
+                if empty_final:
+                    write_json(limit_path, {"kind": "no_final_output"})
+                    raise ReasoningOutputExhausted("模型已耗尽输出额度但没有整理正文。请调整思考强度或更换模型后再试；已保留原稿和用量，不会继续自动拆分调用。")
                 if self.config.get("summaryVersion"):
                     write_json(limit_path, {"kind": "output_limit"})
-                raise OutputLimit()
+                raise ResponseOutputLimit()
             if choice.get("finish_reason") != "stop":
                 raise UserError("模型未正常结束，未把截断或被拒绝的内容保存成笔记。可继续重试。")
+            if isinstance(message, dict) and empty_final and message.get("reasoning_content"):
+                raise UserError("模型只返回推理过程，没有整理正文。请降低思考强度或调整模型输出预算后重试；原稿与已完成阶段已保留。")
             try:
                 content = choice["message"].get("content") or ""
                 content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+                # Keep only the model's final content, before validators expand
+                # provenance in-place. Never replay reasoning text or API data.
+                candidate = content
                 value = json.loads(content)
                 validator(value)
                 write_json(path, value)
                 return value
             except (ValueError, KeyError, TypeError) as error:
                 # Only our structural validator messages; never reflect arbitrary API bodies.
-                feedback = (" 检查提示：" + str(error)[:240]) if self.config.get("summaryVersion") else ""
+                feedback_limit = self.config.get("validationFeedbackChars", 240)
+                feedback_limit = min(1600, max(240, feedback_limit)) if type(feedback_limit) is int else 240
+                feedback = (" 检查提示：" + str(error)[:feedback_limit]) if self.config.get("summaryVersion") else ""
                 if validation_attempt:
                     raise ValueError("模型结构或来源检查未通过") from None
 
@@ -179,7 +257,13 @@ class ChatClient:
                 headers["Authorization"] = "Bearer " + self.config["apiKey"].strip()
             request = urllib.request.Request(self.endpoint, data=encoded(body).encode(), headers=headers)
             try:
-                with opener.open(request, timeout=150) as response:
+                # A large non-streaming answer can take minutes even at low
+                # reasoning effort. Respect the run deadline as well.
+                remaining = self.config.get("summaryTimeoutSeconds", 14400) - (time.monotonic() - self.started)
+                long_request = self.reasoning_effort in ("high", "max") or body.get("max_tokens", 0) >= 8192
+                wait_limit = 1800 if body.get("max_tokens", 0) > 32768 else (600 if long_request else 150)
+                timeout = min(wait_limit, max(1, remaining))
+                with opener.open(request, timeout=timeout) as response:
                     raw = response.read(8 * 1024 * 1024 + 1)
                 if len(raw) > 8 * 1024 * 1024:
                     self.ledger.finish(event, "invalid_response", http_status=200)
@@ -200,9 +284,11 @@ class ChatClient:
                     code = detail.get("code") if isinstance(detail, dict) else None
                 except (ValueError, AttributeError):
                     code = None
+                finally:
+                    error.close()
                 self.ledger.finish(event, "http_error", error_body.get("usage") if isinstance(error_body, dict) else None, http_status=error.code)
                 if code == "context_length_exceeded":
-                    raise OutputLimit() from None
+                    raise InputContextLimit() from None
                 if error.code in (429, 500, 502, 503, 504) and attempt < 2:
                     self.emit("summary", f"接口暂忙，{2 ** (attempt + 1)} 秒后重试（{attempt + 1}/2）…")
                     time.sleep(2 ** (attempt + 1))
@@ -210,8 +296,15 @@ class ChatClient:
                 labels = {401: "API Key 无效或已过期", 403: "模型权限不足或额度已用完", 404: "模型名称或 API 地址不正确",
                           429: "请求频率受限", 400: "接口不接受请求参数；可在设置中改用默认推理强度"}
                 raise UserError(f"{labels.get(error.code, '模型接口请求失败')}（HTTP {error.code}）。已保存原稿和完成的分段。") from None
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            except (KeyboardInterrupt, SystemExit):
+                self.ledger.finish(event, "cancelled")
+                raise
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
                 self.ledger.finish(event, "network_error")
+                if isinstance(error, TimeoutError) or (isinstance(error, urllib.error.URLError) and isinstance(error.reason, TimeoutError)):
+                    # The server may still be generating and charging for this
+                    # POST. Retrying automatically would duplicate paid work.
+                    raise UserError("模型响应超时，未自动重复提交。服务端可能仍在处理，用量未知；已保存原稿与完成阶段，可稍后继续，或调整思考强度。") from None
                 if attempt < 2:
                     self.emit("summary", "连接中断，正在重试模型请求…")
                     time.sleep(2 ** (attempt + 1))
