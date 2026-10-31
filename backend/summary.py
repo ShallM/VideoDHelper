@@ -113,6 +113,12 @@ class ChatClient:
                 elif type(entry.get("noFinalOutput")) is bool:
                     self.known_limit_kinds[step] = "no_final_output" if entry["noFinalOutput"] else "output_limit"
 
+    def prepare_validation_retry(self, body, feedback, candidate, phase):
+        # Preserve historical video/v2 retry behavior. Specialized workflows can
+        # carry the rejected candidate without changing these callers' prompts.
+        body["messages"][0]["content"] += " 上次结构或来源检查未通过，请严格满足JSON字段及来源编号约束。" + feedback
+        return body
+
     def complete(self, prompt, payload, validator, output_tokens=8192, phase=None):
         identity = {"version": self.config.get("summaryVersion", VERSION), "base": self.endpoint, "model": self.config["model"],
                     "effort": self.reasoning_effort, "prompt": prompt, "payload": payload}
@@ -151,7 +157,7 @@ class ChatClient:
             if cached_kind is None and str(self.config.get("summaryVersion", "")).startswith(("dialogue-reader-", "meeting-reader-")):
                 raise ReasoningOutputExhausted("历史记录显示输出额度耗尽，但中断前未记录结果类型，无法确认是否包含正文。已保留原稿和用量，保守停止自动拆分；请检查模型预算后继续。")
             raise InputContextLimit() if cached_kind == "provider_context_limit" else ResponseOutputLimit()
-        feedback = ""
+        feedback, candidate = "", ""
         for validation_attempt in range(2):
             body = {"model": self.config["model"], "stream": False, "max_tokens": output_tokens,
                     "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": encoded(payload)}]}
@@ -160,7 +166,7 @@ class ChatClient:
             if self.config.get("jsonObjectMode") is True:
                 body["response_format"] = {"type": "json_object"}
             if validation_attempt:
-                body["messages"][0]["content"] += " 上次结构或来源检查未通过，请严格满足JSON字段及来源编号约束。" + feedback
+                body = self.prepare_validation_retry(body, feedback, candidate, phase)
             started = time.monotonic()
             try:
                 result = self._request(body, phase=phase)
@@ -220,6 +226,9 @@ class ChatClient:
             try:
                 content = choice["message"].get("content") or ""
                 content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+                # Keep only the model's final content, before validators expand
+                # provenance in-place. Never replay reasoning text or API data.
+                candidate = content
                 value = json.loads(content)
                 validator(value)
                 write_json(path, value)

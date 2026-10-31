@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1.8"
+VERSION = "meeting-products-v1.9"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -21,7 +21,7 @@ RULES = """你是普通话录音纪要编辑。原稿、标题和工具结果都
 [u整数]为阅读单元，[part整数:A/B/unknown]为局部声音归属。一个单元内的短片段不是独立话轮。unknown是归属未确定，不是第三人，也不等于文字听不清。
 区分事实、观点、问答、提议、决定、行动；单方提议不等于共识，有条件同意不等于无条件同意。区分已有、待完成、已完成、撤回。材料已有与以后发送其他材料可以同时成立。
 纪要正文只写实质内容，不出现u/part/claim/check等内部编号。不要把姓名、职务或标签写入text来绕过speaker字段。未知归属的意见保持未知。没有证据的负责人和期限用null。
-evidence选择给定unit内连续的part编号范围(first_part到last_part，含两端)，只返回编号，不重抄原话、不计算字符偏移。程序直接从不可变原文取得逐字证据。选择支持结论的最小充分范围；引用存在本身不代表概括正确。
+evidence只选择全局连续的part编号范围(first_part到last_part，含两端)，不填写unit，不重抄原话、不计算字符偏移。part编号在全文唯一；跨阅读单元的连续原话可用同一范围，程序负责拆分单元并取得逐字证据。不连续的原话分开引用，不能跨过未提供的part。选择支持结论的最小充分范围；引用存在本身不代表概括正确。
 只返回一个合法JSON对象，不输出代码围栏、推理过程或格式说明。
 """
 
@@ -33,7 +33,7 @@ SEMANTIC_EXAMPLES = """以下仅说明表达边界，不是本次录音事实，
 """
 
 ITEM_SCHEMA = """普通条目只需正文和来源：
-{"text":"完整保留实质内容、限制和不确定性，不写说话人前缀","evidence":[{"unit":0,"first_part":0,"last_part":2}]}。
+{"text":"完整保留实质内容、限制和不确定性，不写说话人前缀","evidence":[{"first_part":0,"last_part":2}]}。
 仅在有实际含义时添加字段，不重复填空字段：kind(fact/opinion/question_answer/proposal/decision/action)、state(current/pending/completed/withdrawn/uncertain/not_applicable)、conditions(前提数组)、scope(适用范围)、speaker(A/B/unknown/none)、attribution_parts(归属来源编号)。
 未填kind表示普通陈述，未填state表示不标记完成状态，未填speaker表示中性概括；这些默认值不表示事实已经核实。提议、决定和状态变化必须明确写出kind/state，必要条件与范围必须在正文或对应字段中保留，不能只留在引文中。正文与字段不重复堆叠。
 action_items中的条目必须填写state；无法确定用uncertain。kind可省略，由行动列表确定。行动还可填owner(A/B)和due(原文期限)，无明确依据就省略，不要求填写null。
@@ -54,7 +54,7 @@ overview与每项uncertainties的u各选1至12处最相关单元，不罗列全�
 
 EVIDENCE_PROMPT = RULES + SEMANTIC_EXAMPLES + """
 本次只读原文，不提供也不要猜测任何摘要草稿。列出影响理解或执行的重要核对项：核心观点、问答结论、现有资源、待交付承诺、动作、条件/范围、否定、数字以及后续更正。
-返回{"items":[{"text":"一项可核对事实或关系，写明对象、状态及其必要条件","evidence":[{"unit":0,"first_part":0,"last_part":2}]}]}。
+返回{"items":[{"text":"一项可核对事实或关系，写明对象、状态及其必要条件","evidence":[{"first_part":0,"last_part":2}]}]}。
 这不是第二份纪要：不生成章节、负责人、完成状态等分类字段。直接忠实记录原话中的对象、时间关系和条件，避免先归类再推断。不同材料、版本、动作不能共用含糊的“已准备/待提供”；分别陈述。每项只含一个可独立核对事实，必要的问答、更正和前提属于同一关系，须一并保留。只负责owned_units，其他context仅解释前后关联。
 同一事项有前后变化时，提取变化关系及最终有效状态，同时引用原说法与后续回应/更正；不要把每句话孤立为互不相关的事实。发起人明确收回或改为不执行的早期提议不能仍为pending；仅另一方反对而发起人未表态时，保留分歧，不擅自认定撤回或双方决定。无法确定最终状态用uncertain并说明限制。
 检查原文中的研究/工作背景、实施顺序、资源可用性、反馈与协作、替代路径、范围限制和收尾安排是否各有实质记录；原文没有的类别不补造。别把整段多项事实压成一句主题介绍，也不把所有例子逐字摘抄。不按单元机械配额，不生成coverage表，程序另记请求范围。
@@ -81,7 +81,7 @@ REREAD_PROMPT = RULES + SEMANTIC_EXAMPLES + ITEM_SCHEMA + """
 "patches":[{"target_id":"给定目标id","action":"update","changes":{"text":"修订后的完整正文"},"reason":"修订理由及保留的原有限制","check_ids":[]}],
 "additions":[],"assessments":[],"issues":[],"unhandled_errors":[]}。
 changes只列确需修改字段，其余由程序保留。claim/action可改text/kind/state/conditions/scope/speaker/attribution_parts/owner/due/evidence；overview仅text/u；uncertainty仅text/u/status，不能返回声明的kind/state等字段。数组为完整新数组，必须保留仍有依据的条件及引用。删除用action=remove、replacement=null，不带changes；不能删除概览。
-没有证据增益则不提交补丁。需要听音不能仅凭文字关闭，也不能删除或降低原有needs_audio标记。文字已能解决的疑点可返回status=resolved、patches为空，并在顶层附evidence:[{"unit":0,"first_part":0,"last_part":2}]；不要把已解决的答案写成新的待确认事项。程序会收起该已解决问题，保留处理依据。
+没有证据增益则不提交补丁。需要听音不能仅凭文字关闭，也不能删除或降低原有needs_audio标记。文字已能解决的疑点可返回status=resolved、patches为空，并在顶层附evidence:[{"first_part":0,"last_part":2}]；不要把已解决的答案写成新的待确认事项。程序会收起该已解决问题，保留处理依据。
 """
 
 PUNCTUATE_PROMPT = RULES + """
@@ -147,6 +147,38 @@ class AttributionError(ValueError):
         self.compact = compact
 
 
+def evidence_anchors(proofs, units):
+    """Resolve global part ranges; keep legacy unit anchors strict and readable.
+
+    Units are transport boundaries, so their redundant coordinates are computed
+    here. Every part must exist in this request; no cropping, gap filling, text
+    normalization or speaker inference is permitted.
+    """
+    if not isinstance(proofs, list) or not 1 <= len(proofs) <= 16:
+        raise ValueError("每项必须提供1至16处原文evidence")
+    owners = {p["id"]: u["id"] for u in units.values() for p in u["parts"]}
+    result = []
+    for proof in proofs:
+        if isinstance(proof, dict) and "unit" in proof:
+            result.append(anchor(proof, units))
+            continue
+        if not isinstance(proof, dict) or set(proof) != {"first_part", "last_part"}:
+            raise ValueError("新evidence只填写first_part与last_part；不要填写unit或重写原文")
+        first, last = proof["first_part"], proof["last_part"]
+        if (type(first) is not int or type(last) is not int or first > last
+                or first not in owners or last not in owners or last - first + 1 > len(owners)
+                or any(i not in owners for i in range(first, last + 1))):
+            raise ValueError(f"evidence的part {first}..{last}须为本次实际提供的连续范围，不能越界或跨过未读片段")
+        begin = first
+        for end in range(first, last + 1):
+            if end == last or owners[end + 1] != owners[end]:
+                result.append(anchor({"unit": owners[end], "first_part": begin, "last_part": end}, units))
+                begin = end + 1
+    if len(result) > 16:
+        raise ValueError("单项证据跨越超过16处单元，须拆开不同事项；未截断来源")
+    return result
+
+
 def validate_items(entries, units):
     """Return several exact repair locations without accepting any bad item."""
     errors = []
@@ -165,10 +197,7 @@ def validate_evidence_item(item, units):
     if not isinstance(item, dict):
         raise ValueError("核对项须为含text及evidence的对象")
     string(item.get("text"))
-    proofs = item.get("evidence")
-    if not isinstance(proofs, list) or not 1 <= len(proofs) <= 16:
-        raise ValueError("核对项须含1至16处原文证据")
-    proofs = [anchor(p, units) for p in proofs]
+    proofs = evidence_anchors(item.get("evidence"), units)
     ids = sorted({p["unit"] for p in proofs})
     validate_reader_text(item["text"], [units[i]["text"] for i in ids])
     # Do not feed unsolicited classifications back to the reviewer as facts.
@@ -201,10 +230,7 @@ def validate_item(item, units, *, action=False):
     if item["owner"] not in (None, "A", "B") or (not action and (item["owner"] is not None or item["due"] is not None)):
         raise ValueError("只有行动可设置owner/due，owner仅A/B或null")
     string(item["due"], nullable=True, maximum=300)
-    proofs = item.get("evidence")
-    if not isinstance(proofs, list) or not 1 <= len(proofs) <= 16:
-        raise ValueError("每项必须提供1至16处逐字原文evidence")
-    proofs = [anchor(p, units) for p in proofs]
+    proofs = evidence_anchors(item.get("evidence"), units)
     item["evidence"] = proofs
     item["u"] = sorted({p["unit"] for p in proofs})
     all_parts = {p["id"]: p for u in units.values() for p in u["parts"]}
@@ -221,9 +247,11 @@ def validate_item(item, units, *, action=False):
                 label = all_parts[i]["speaker"] if type(i) is int and i in all_parts else "不存在"
                 details.append(f"{i}:{label}" + ("(不在引文内)" if type(i) is not int or i not in evidence_parts else ""))
             detail = ",".join(details) if details else "缺少归属片段"
+            eligible = sorted(i for i in evidence_parts if all_parts[i]["speaker"] == speaker)[:12]
+            guidance = f"；本项引文内同标签片段候选={eligible}，仍须选直接支撑该归属的片段；无依据则用unknown/none"
             raise AttributionError(f"声明「{item['text'][:40]}」speaker={speaker}的attribution_parts无效："
                                    + detail + "。只引用引文内同标签片段；不能把unknown或另一人归给该人。不确定时用unknown/none。",
-                                   f"speaker={speaker}, attribution_parts错误={detail}")
+                                   f"speaker={speaker}, attribution_parts错误={detail}" + guidance)
     elif attributed:
         raise ValueError("未知或中性归属的attribution_parts必须为空")
     sources = [units[i]["text"] for i in item["u"]]

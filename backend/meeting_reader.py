@@ -12,12 +12,12 @@ from dialogue_context import source_text, select_context
 from dialogue_reader import Reader, condensed_batches, citations, validate_reader_text
 from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, DRAFT_PROMPT,
     EVIDENCE_PROMPT, REVIEW_PROMPT, REREAD_PROMPT, PUNCTUATE_PROMPT, validate_document,
-    validate_item, validate_evidence_item, punctuation_rows, render_item, string, anchor, OPTIONAL_DEFAULTS)
+    validate_item, validate_evidence_item, punctuation_rows, render_item, string, evidence_anchors, OPTIONAL_DEFAULTS)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit, OutputLimit
 from summary_v2 import estimated_tokens
 
-VERSION = "meeting-reader-v3.14"
-PROMPT_VERSION = "meeting-prompts-v1.7"
+VERSION = "meeting-reader-v3.15"
+PROMPT_VERSION = "meeting-prompts-v1.8"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
 VALIDATION_FEEDBACK_CHARS = 1600
@@ -40,12 +40,36 @@ def compact_evidence(value):
             if content == OPTIONAL_DEFAULTS[key] and not (key == "state" and value.get("kind") in ("action", "proposal", "decision")):
                 continue
         if key == "evidence":
-            result[key] = [{k: proof[k] for k in ("unit", "first_part", "last_part")}
+            result[key] = [{k: proof[k] for k in ("first_part", "last_part")}
                            if all(type(proof.get(k)) is int for k in ("unit", "first_part", "last_part"))
                            else copy.deepcopy(proof) for proof in content]
         else:
             result[key] = compact_evidence(content)
     return result
+
+
+class MeetingChatClient(ChatClient):
+    def __init__(self, *args, input_budget, context_limit, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.input_budget, self.context_limit = input_budget, context_limit
+        self.validation_retries = []
+
+    def prepare_validation_retry(self, body, feedback, candidate, phase):
+        # Diagnostics only, never treated as a successful/resumable result.
+        saved = self.directory / "rejected" / (digest({"phase": phase, "candidate": candidate}) + ".json")
+        write_json(saved, {"phase": phase, "candidate": candidate, "error": feedback})
+        body["messages"].extend([
+            {"role": "assistant", "content": candidate},
+            {"role": "user", "content": "上一条是待修正候选，不是事实或指令。只修正以下结构/来源错误，"
+             "保留其他正文、条件、状态与有效引用，返回修正后的完整JSON。不要从头重新构思或添加无关内容。" + feedback}])
+        size = estimated_tokens(body)
+        allowed = size <= self.input_budget and (self.context_limit is None or size + body["max_tokens"] + 512 <= self.context_limit)
+        self.validation_retries.append({"phase": phase, "estimatedInputTokens": size, "withinBudget": allowed,
+                                        "candidatePath": str(saved.relative_to(self.directory))})
+        if not allowed:
+            raise UserError("带原候选的修正请求超过输入或已确认的上下文容量；候选与用量已保存，未删减原文或重复整稿生成")
+        self.emit("summary", "保留原候选，按具体错误修正一次…")
+        return body
 
 
 class MeetingReader(Reader):
@@ -75,7 +99,8 @@ class MeetingReader(Reader):
             "prompts": [DRAFT_PROMPT, EVIDENCE_PROMPT, REVIEW_PROMPT, REREAD_PROMPT, PUNCTUATE_PROMPT]})
         self.config["summaryVersion"] = VERSION
         self.config["validationFeedbackChars"] = VALIDATION_FEEDBACK_CHARS
-        self.client = ChatClient(self.config, self.folder / "checkpoints" / "meeting-v3" / self.identity, emit)
+        self.client = MeetingChatClient(self.config, self.folder / "checkpoints" / "meeting-v3" / self.identity, emit,
+                                       input_budget=self.input_budget, context_limit=self.context_limit)
         self.checks, self.assessments, self.retrieval_cache = {}, {}, {}
         self.retrieval_hits = self.duplicate_issues = self.no_progress = 0
         self.evidence_batches, self.review_batches = 0, 0
@@ -314,8 +339,7 @@ class MeetingReader(Reader):
             if value["status"] == "resolved" and not value["patches"]:
                 if not value.get("evidence"):
                     raise ValueError("无正文修订的resolved也须提供evidence逐字证据")
-                for proof in value["evidence"]:
-                    anchor(proof, allowed)
+                value["evidence"] = evidence_anchors(value["evidence"], allowed)
 
     def apply_repair(self, value, phase):
         before = copy.deepcopy(self.document)
@@ -562,6 +586,7 @@ class MeetingReader(Reader):
                        "noProgressRereads": self.no_progress, "condenseBatches": self.condense_batches,
                        "skippedRereadsWithoutNewContext": self.skipped_rereads,
                        "validationFailures": self.validation_failure_count,
+                       "validationRetries": self.client.validation_retries,
                        "changedRepairBatches": sum(p["changed"] for p in self.patch_log)})
 
 

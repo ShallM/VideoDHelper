@@ -9,7 +9,7 @@ from unittest.mock import patch
 from common import UserError, read_json, write_json
 from dialogue_context import build_context
 from dialogue_reader import Reader
-from meeting_contract import validate_item, validate_evidence_item, validate_document, punctuation_rows, render_item, anchor, REREAD_PROMPT
+from meeting_contract import validate_item, validate_evidence_item, validate_document, punctuation_rows, render_item, anchor, evidence_anchors, REREAD_PROMPT
 from meeting_reader import MeetingReader, compact_evidence, format_dialogue
 from summary import ChatClient, InputContextLimit, ReasoningOutputExhausted, ResponseOutputLimit
 from worker import validate_request
@@ -76,7 +76,7 @@ class MeetingTests(unittest.TestCase):
             value = {"rows": [{"first": payload["owned_parts"][0], "last": payload["owned_parts"][-1]}], "insertions": []}
         else:
             raise AssertionError(phase)
-        return self.envelope(value)
+        return self.envelope(compact_evidence(value))
 
     def envelope(self, value):
         return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(value, ensure_ascii=False)}}],
@@ -276,7 +276,7 @@ class MeetingTests(unittest.TestCase):
         self.hook = invalid_first
         _, _ = self.run_reader(dialogueStrategy="meeting-baseline")
         self.assertEqual(len(drafts), 2)
-        feedback = drafts[1]["messages"][0]["content"]
+        feedback = drafts[1]["messages"][-1]["content"]
         self.assertIn("chapters[0].claims[0]", feedback)
         self.assertIn("chapters[0].claims[7]", feedback)  # Beyond the old 240-character cut.
         self.assertIn("实际范围为0..3", feedback)
@@ -286,6 +286,73 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual([i["speaker"] for i in failed], ["A"] * 8)
         self.assertEqual(failed[0]["evidence"][0]["last_part"], 999)  # Never cropped silently.
         self.assertEqual(report["failureCount"], 1)
+
+    def test_retry_retains_original_candidate_without_expanded_quotes_or_reasoning(self):
+        original = None
+        def invalid_first(client, body, phase, payload):
+            nonlocal original
+            if phase != "meeting_draft": return None
+            if len(self.requests) == 1:
+                original = compact_evidence(document(self.engine.units))
+                original["chapters"][0]["claims"][0].update(speaker="A", conditions=["仅此项目"], scope="合成范围")
+                result = self.envelope(original)
+                result["choices"][0]["message"]["reasoning_content"] = "PRIVATE_REASONING_NOT_FOR_REPLAY"
+                return result
+            messages = body["messages"]
+            self.assertEqual([m["role"] for m in messages], ["system", "user", "assistant", "user"])
+            self.assertEqual(json.loads(messages[2]["content"]), original)
+            self.assertNotIn("PRIVATE_REASONING_NOT_FOR_REPLAY", json.dumps(messages))
+            self.assertNotIn("quote", messages[2]["content"])
+            self.assertEqual(messages[0], self.requests[0][2]["messages"][0])
+            fixed = copy.deepcopy(original)
+            fixed["chapters"][0]["claims"][0]["speaker"] = "B"
+            return self.envelope(fixed)
+        self.hook = invalid_first
+        engine, (notes, _) = self.run_reader(dialogueStrategy="meeting-baseline")
+        metadata = notes["chapters"][0]["claims"][0]["metadata"]
+        self.assertEqual(metadata["conditions"], ["仅此项目"])
+        self.assertEqual(metadata["scope"], "合成范围")
+        self.assertEqual(len(engine.client.validation_retries), 1)
+        self.assertTrue(engine.client.validation_retries[0]["withinBudget"])
+        saved = read_json(engine.client.directory / engine.client.validation_retries[0]["candidatePath"])
+        self.assertEqual(json.loads(saved["candidate"]), original)
+        self.assertNotIn("PRIVATE_REASONING_NOT_FOR_REPLAY", json.dumps(saved))
+        before = len(self.requests)
+        self.run_reader(dialogueStrategy="meeting-baseline")
+        self.assertEqual(len(self.requests), before)
+
+    def test_candidate_repair_capacity_stops_before_second_request_without_truncation(self):
+        for config in ({"summaryInputBudget": 4000}, {"summaryContextWindow": 5000}):
+            with self.subTest(config=config):
+                e = self.reader(dialogueOutputTokens=256, dialogueMaxOutputTokens=256, **config)
+                self.requests.clear()
+                original = {"text": "原" * 4000}
+                self.hook = lambda *a: self.envelope(original)
+                def reject(value):
+                    raise ValueError("合成的来源错误")
+                with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+                    with self.assertRaisesRegex(UserError, "带原候选的修正请求超过"):
+                        e.call("合成测试", {"sources": "完整原文"}, reject, "meeting_draft")
+                self.assertEqual(len(self.requests), 1)
+                self.assertFalse(e.client.validation_retries[0]["withinBudget"])
+                self.assertEqual(read_json(self.folder / "meeting-validation.json")["failures"][0]["candidate"], original)
+                saved = read_json(e.client.directory / e.client.validation_retries[0]["candidatePath"])
+                self.assertEqual(json.loads(saved["candidate"]), original)
+
+    def test_shared_client_keeps_historical_retry_messages(self):
+        client = ChatClient(self.config, self.folder / "legacy-client", lambda *a: None)
+        requests = []
+        def respond(body, phase):
+            requests.append(copy.deepcopy(body))
+            return self.envelope({"valid": len(requests) == 2})
+        def validate(value):
+            if not value["valid"]: raise ValueError("invalid")
+        with patch.object(client, "_request", respond):
+            result = client.complete("old prompt", {"source": "unchanged"}, validate)
+        self.assertTrue(result["valid"])
+        self.assertEqual(len(requests[1]["messages"]), 2)
+        self.assertTrue(requests[1]["messages"][0]["content"].startswith("old prompt 上次结构或来源检查未通过"))
+        self.assertEqual(requests[1]["messages"][1], requests[0]["messages"][1])
 
     def test_identity_isolates_strategy_effort_source_and_limits(self):
         original = self.reader().identity
@@ -333,11 +400,41 @@ class MeetingTests(unittest.TestCase):
         validate_document(original, e.units)
         compact = compact_evidence(original)
         self.assertNotIn("quote", compact["chapters"][0]["claims"][0]["evidence"][0])
+        self.assertNotIn("unit", compact["chapters"][0]["claims"][0]["evidence"][0])
         self.assertIn("quote", original["chapters"][0]["claims"][0]["evidence"][0])
         validate_document(compact, e.units)
         self.assertEqual(compact, original)
         legacy = {"evidence": [{"unit": 0, "quote": "旧引用"}]}
         self.assertEqual(compact_evidence(legacy), legacy)
+
+    def test_global_part_ranges_cross_transport_units_without_losing_text_or_attribution(self):
+        segments = [{"id": i, "start": i * 30., "end": i * 30. + 2., "text": text, "speaker": speaker}
+                    for i, (text, speaker) in enumerate([("暂不执行。", "B"), ("否", "unknown"), ("下周再讨论。", "A")])]
+        e = self.reader(segments)
+        proofs = evidence_anchors([{"first_part": 0, "last_part": 2}], e.lookup)
+        self.assertEqual([p["unit"] for p in proofs], [0, 1, 2])
+        self.assertEqual("".join(p["quote"] for p in proofs), "".join(s["text"] for s in segments))
+        self.assertEqual(evidence_anchors(proofs, e.lookup), proofs)
+        claim = {"text": "先不执行，之后再讨论。", "evidence": [{"first_part": 0, "last_part": 2}]}
+        validate_item(claim, e.lookup)
+        self.assertEqual(claim["u"], [0, 1, 2])
+        unknown = {**claim, "speaker": "B", "attribution_parts": [1]}
+        with self.assertRaisesRegex(ValueError, "1:unknown"):
+            validate_item(unknown, e.lookup)
+        self.assertEqual(unknown["speaker"], "B")  # Not silently reassigned.
+        inventory = validate_evidence_item({"text": claim["text"], "evidence": [{"first_part": 0, "last_part": 2}]}, e.lookup)
+        self.assertEqual(inventory["evidence"], proofs)
+
+    def test_global_ranges_reject_missing_parts_and_do_not_repair_conflicting_legacy_coordinates(self):
+        units = build_context([{**s, "start": i * 30., "end": i * 30. + 2.} for i, s in enumerate(transcript())])
+        all_units = {u["id"]: u for u in units}
+        subset = {0: units[0], 2: units[2]}
+        for proof in ({"first_part": 0, "last_part": 999999999}, {"first_part": True, "last_part": 0},
+                      {"first_part": 2, "last_part": 0}, {"first_part": 0, "last_part": 2}):
+            with self.subTest(proof=proof), self.assertRaises(ValueError): evidence_anchors([proof], subset)
+        with self.assertRaises(ValueError): evidence_anchors([{"first_part": 0, "last_part": 0, "quote": "篡改"}], all_units)
+        with self.assertRaises(ValueError): evidence_anchors([{"unit": 0, "first_part": 0, "last_part": 1}], all_units)
+        with self.assertRaises(ValueError): evidence_anchors([{"unit": 1, "first_part": 0, "last_part": 0}], all_units)
 
     def test_rendering_keeps_condition_scope_state_and_action_deadline_separate(self):
         e = self.reader()
@@ -446,7 +543,7 @@ class MeetingTests(unittest.TestCase):
             value = e.call(REREAD_PROMPT, {"sources": "合成测试"},
                 lambda v: e.validate_repair(v, e.units, targets, {"uncertainty-0"}, {}, reread=True), "meeting_reread")
         self.assertEqual(len(self.requests), 2)
-        feedback = self.requests[1][2]["messages"][0]["content"]
+        feedback = self.requests[1][2]["messages"][-1]["content"]
         self.assertIn("uncertainty-0的target_kind=uncertainty", feedback)
         self.assertIn('"status":"unresolved或needs_audio"', feedback)
         self.assertEqual(value["patches"][0]["replacement"], valid["patches"][0]["replacement"])
@@ -475,14 +572,14 @@ class MeetingTests(unittest.TestCase):
         proposal = empty_review()
         proposal["issues"] = [{"target_id": "uncertainty-0", "field": "text", "kind": "state", "question": question["text"], "u": [0], "query": "资料", "status": "unresolved"}]
         e.apply_repair(proposal, "review")
-        self.hook = lambda *_: self.envelope({**empty_review(), "status": "resolved", "reason": "原话明确资料已经有了", "evidence": [{"unit": 0, "first_part": 0, "last_part": 0}]})
+        self.hook = lambda *_: self.envelope({**empty_review(), "status": "resolved", "reason": "原话明确资料已经有了", "evidence": [{"first_part": 0, "last_part": 0}]})
         with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
             e.reread()
         self.assertEqual(e.reread_count, 1)
         self.assertEqual(e.outputs()[0]["uncertainties"], [])
         self.assertEqual(e.document["uncertainties"], [question])
         proof = e.patch_log[-1]["proposal"]["evidence"][0]
-        self.assertEqual(proof, {"unit": 0, "first_part": 0, "last_part": 0})
+        self.assertEqual({k: proof[k] for k in ("unit", "first_part", "last_part")}, {"unit": 0, "first_part": 0, "last_part": 0})
         self.assertEqual(anchor(proof, e.lookup)["quote"], e.units[0]["parts"][0]["text"])
 
     def test_registered_doubts_replace_the_draft_row_without_merging_distinct_fields(self):
