@@ -45,12 +45,25 @@ def validate_segments(segments):
     if not isinstance(segments, list) or not segments:
         raise UserError("没有可处理的语音文字，请选择其他字幕或本地转录。")
     for index, segment in enumerate(segments):
-        if (segment.get("id") != index or not isinstance(segment.get("text"), str)
+        if (not isinstance(segment, dict) or type(segment.get("id")) is not int or segment.get("id") != index or not isinstance(segment.get("text"), str)
                 or not segment["text"].strip()
                 or any(type(segment.get(k)) not in (int, float) or not math.isfinite(segment[k]) for k in ("start", "end"))
                 or not 0 <= segment["start"] <= segment["end"]
                 or (index > 0 and segment["start"] < segments[index - 1]["start"])):
             raise UserError("原稿的编号、时间或文字无效，不能继续生成笔记。")
+        if segment.get("speaker") is not None and segment["speaker"] not in ("A", "B", "unknown"):
+            raise UserError("原稿的说话人编号无效，请重新检查修订。")
+        if "words" in segment:
+            if not isinstance(segment["words"], list):
+                raise UserError("原稿的词语时间无效。")
+            previous = segment["start"]
+            for word in segment["words"]:
+                if (not isinstance(word, dict) or not isinstance(word.get("word"), str)
+                        or any(type(word.get(k)) not in (int, float) or not math.isfinite(word[k]) for k in ("start", "end"))
+                        or not segment["start"] <= word["start"] <= word["end"] <= segment["end"] + 0.001
+                        or word["start"] < previous):
+                    raise UserError("原稿的词语时间无效。")
+                previous = word["start"]
 
 
 def stamp(seconds, milliseconds=False):

@@ -20,8 +20,10 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = json.loads((ROOT / "packaging/runtime.json").read_text())
+SPEAKER_ENGINE = json.loads((ROOT / "packaging/speakerkit.json").read_text())
 CACHE = ROOT / "build/distribution-deps"
 OUTPUT = ROOT / "dist"
+CHANNEL = "release"
 
 
 def run(*args, **kwargs):
@@ -107,6 +109,9 @@ print(json.dumps(sorted(items,key=lambda x:x['name'].lower())))
     packages = json.loads(subprocess.check_output([str(python / "bin/python3.12"), "-I", "-B", "-c", script], text=True))
     for item in packages:
         item["files"] = [str(Path(name).relative_to(resources)) for name in item["files"]]
+    packages.append({"name": "SpeakerKit / Argmax OSS", "version": SPEAKER_ENGINE["revision"],
+                     "license": SPEAKER_ENGINE["license"], "files": ["licenses/argmax-oss-MIT.txt", "licenses/argmax-oss-NOTICES.txt", "licenses/speakerkit-models-NOTICE.txt"],
+                     "model": SPEAKER_ENGINE})
     (resources / "dependency-inventory.json").write_text(json.dumps(packages, ensure_ascii=False, indent=2) + "\n")
     body = ["<!doctype html><meta charset='utf-8'><title>VideoDHelper · 第三方许可</title>",
             "<style>body{font:15px -apple-system,sans-serif;max-width:900px;margin:48px auto;line-height:1.7;padding:0 24px}code{word-break:break-word}a{color:#087e80}</style>",
@@ -126,6 +131,7 @@ print(json.dumps(sorted(items,key=lambda x:x['name'].lower())))
 
 
 def build_app():
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     python = runtime()
     media, source = ffmpeg()
     run("zsh", ROOT / "scripts/swift-project.sh", "build", "-c", "release")
@@ -147,11 +153,14 @@ def build_app():
         if package.is_dir():
             shutil.rmtree(package)
     (resources / "bin").mkdir()
+    shutil.copy2(ROOT / ".build/release/recording-diarize", resources / "bin/recording-diarize")
+    shutil.copy2(ROOT / "packaging/speakerkit.json", resources / "speakerkit.json")
     for name in ("ffmpeg", "ffprobe"):
         shutil.copy2(media / "bin" / name, resources / "bin" / name)
     (resources / "backend").mkdir()
     for path in (ROOT / "backend").glob("*.py"):
         shutil.copy2(path, resources / "backend" / path.name)
+    shutil.copy2(ROOT / "backend/asr_catalog.json", resources / "backend/asr_catalog.json")
     for name, mode in [("video-worker", "worker"), ("yt-dlp", "yt-dlp"), ("runtime-check", "self-test")]:
         entry = resources / name
         entry.write_text('#!/bin/sh\nset -eu\nRESOURCE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\n'
@@ -169,12 +178,13 @@ def build_app():
             "LSMinimumSystemVersion": CONFIG["minimumMacOS"], "LSArchitecturePriority": ["arm64"],
             "LSRequiresNativeExecution": True, "NSHighResolutionCapable": True, "CFBundleIconFile": "AppIcon",
             "NSHumanReadableCopyright": "Copyright © 2026 ShallM. PolyForm Noncommercial 1.0.0.",
-            "VideoDHelperDistribution": True}
+            "VideoDHelperDistribution": True, "VideoDHelperBuildChannel": CHANNEL,
+            "VideoDHelperSourceRevision": revision}
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
     (resources / "distribution.json").write_text(json.dumps({"version": CONFIG["version"], "architecture": "arm64",
         "minimumMacOS": CONFIG["minimumMacOS"], "notarized": False, "signing": "ad-hoc",
-        "sourceRevision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-        "runtime": CONFIG}, ensure_ascii=False, indent=2) + "\n")
+        "sourceRevision": revision, "channel": CHANNEL, "build": CONFIG["build"],
+        "runtime": CONFIG, "speakerEngine": SPEAKER_ENGINE}, ensure_ascii=False, indent=2) + "\n")
     # Sign leaves first, then the containing app. No Developer ID is claimed.
     for path in sorted(app.rglob("*")):
         if is_macho(path):
@@ -203,13 +213,18 @@ def build_app():
 
 
 def main():
+    global OUTPUT, CHANNEL
     parser = argparse.ArgumentParser()
     parser.add_argument("--app-only", action="store_true")
+    parser.add_argument("--output-dir", type=Path, help="Build into a separate directory, e.g. an ignored local preview folder.")
+    parser.add_argument("--channel", choices=("release", "local-preview"), default="release")
     args = parser.parse_args()
+    CHANNEL = args.channel
+    if args.output_dir: OUTPUT = args.output_dir.resolve()
     if os.uname().machine != "arm64":
         raise SystemExit("Build with a native Apple Silicon toolchain.")
     CACHE.mkdir(parents=True, exist_ok=True)
-    OUTPUT.mkdir(exist_ok=True)
+    OUTPUT.mkdir(parents=True, exist_ok=True)
     app, assets = build_app()
     if not args.app_only:
         dmg = OUTPUT / f"VideoDHelper-{CONFIG['version']}-macOS-arm64.dmg"
@@ -228,7 +243,7 @@ def main():
             for key in ("ffmpeg", "pythonBuildSource"):
                 path = archive(key)
                 bundle.add(path, arcname=path.name)
-            for name in ("build-ffmpeg.sh", "runtime.json", "requirements.in", "requirements.lock"):
+            for name in ("build-ffmpeg.sh", "runtime.json", "speakerkit.json", "requirements.in", "requirements.lock"):
                 bundle.add(ROOT / "packaging" / name, arcname="build/" + name)
             bundle.add(ROOT / "THIRD_PARTY_NOTICES.md", arcname="THIRD_PARTY_NOTICES.md")
         manifest = OUTPUT / "build-manifest.json"

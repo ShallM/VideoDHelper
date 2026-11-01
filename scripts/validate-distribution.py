@@ -102,6 +102,8 @@ def inspect_app(app):
             if dependency not in own_ids and not dependency.startswith(("@", "/usr/lib/", "/System/Library/")):
                 raise ValueError("External developer dependency: " + str(path.relative_to(app)))
     if (app / "Contents/Resources/development-env-path.txt").exists(): raise ValueError("Development config pointer found")
+    if list(app.rglob("*.safetensors")) or list(app.rglob("*.pt")):
+        raise ValueError("ASR weights must not be bundled in the application")
     command("codesign", "--verify", "--deep", "--strict", app)
     return {"version": info["CFBundleShortVersionString"], "machoFiles": count, "architecture": "arm64", "maximumDeploymentTarget": info["LSMinimumSystemVersion"], "externalDeveloperLibraries": 0}
 
@@ -130,6 +132,11 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix="VideoDHelper-installation-") as temporary:
             support = Path(temporary)
+            inventory = command(resources / "video-worker", "--models", "list", "--support", support, env=env, cwd="/")
+            models = json.loads(inventory.splitlines()[-1])["models"]
+            assert [m["id"] for m in models] == ["turbo", "large-v3", "qwen3-asr-1.7b"]
+            assert all(m["state"] == "uninstalled" and m["installedBytes"] == 0 for m in models)
+            report["localModels"] = {"catalogPackaged": True, "cleanInstallWeights": 0, "choices": [m["id"] for m in models]}
             folder = fixture(support, server.server_port)
             command(resources / "video-worker", "--job", folder, "--support", support, env=env, cwd="/")
             assert json.loads((folder / "job.json").read_text())["state"] == "completed"

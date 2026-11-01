@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-28",
+  "baselineCodeCommit": "988c390e0fec74c0c21ab96308216260b5a00fa8",
+  "scope": "One approximately 22-minute Mandarin two-person recording; offline output audit only.",
+  "groundTruth": "No human-labelled audio transcript or speaker reference; no CER, DER, accuracy or semantic recall claim.",
+  "characterDefinition": "Python len of stored text, including stored punctuation and spaces; excludes rendering labels and headings.",
+  "asr": {
+    "items": 784,
+    "characters": 6144,
+    "medianCharacters": 7.0,
+    "oneCharacter": 19,
+    "atMostTwoCharacters": 38,
+    "atMostFiveCharacters": 212
+  },
+  "aligned": {
+    "items": 1060,
+    "characters": 6139,
+    "medianCharacters": 5.0,
+    "oneCharacter": 147,
+    "atMostTwoCharacters": 269,
+    "atMostFiveCharacters": 559
+  },
+  "readingParagraphs": {
+    "items": 504,
+    "characters": 6139,
+    "medianCharacters": 4.0,
+    "oneCharacter": 92,
+    "atMostTwoCharacters": 172,
+    "atMostFiveCharacters": 295
+  },
+  "readingTransport": {
+    "bodyCharacters": 6139,
+    "serializedCharacters": 17536,
+    "bodyEstimatedWorkingTokens": 8886,
+    "serializedEstimatedWorkingTokens": 12685,
+    "estimateDefinition": "ceil(non-ASCII*1.5 + ASCII/3); not provider tokenizer/usage"
+  },
+  "speakerBoundaries": {
+    "allLabelChanges": 495,
+    "directABChanges": 26,
+    "singleUnknownBetweenSameKnownSpeaker": 162,
+    "interpretation": "Diagnostics only; do not infer the correct speaker from neighbours without audio evaluation."
+  },
+  "low": {
+    "chapters": 13,
+    "claims": 59,
+    "keyPoints": 8,
+    "uncertainties": 15,
+    "claimCharacters": 5317,
+    "overviewCharacters": 157,
+    "keyPointCharacters": 795,
+    "uncertaintyCharacters": 827,
+    "condensed": {
+      "items": 496,
+      "characters": 6385,
+      "medianCharacters": 5.0,
+      "oneCharacter": 78,
+      "atMostTwoCharacters": 158,
+      "atMostFiveCharacters": 279
+    }
+  },
+  "high": {
+    "chapters": 11,
+    "claims": 59,
+    "keyPoints": 8,
+    "uncertainties": 19,
+    "claimCharacters": 5171,
+    "overviewCharacters": 131,
+    "keyPointCharacters": 813,
+    "uncertaintyCharacters": 1253,
+    "condensed": {
+      "items": 496,
+      "characters": 6361,
+      "medianCharacters": 4.0,
+      "oneCharacter": 80,
+      "atMostTwoCharacters": 162,
+      "atMostFiveCharacters": 283
+    }
+  },
+  "semanticAssessment": "Separate source-text review found unsupported interpretation, omitted condition despite citation coverage, duplicated uncertainty, and alignment fragments narrated as speech events. Audio ground truth is still required."
+}

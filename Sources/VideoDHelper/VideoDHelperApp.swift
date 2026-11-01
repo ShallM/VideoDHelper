@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        ASRModelStore.shared.prepareForQuit()
         guard BackgroundProcesses.isRunning else { return .terminateNow }
         guard !isTerminating else { return .terminateLater }
         isTerminating = true

@@ -28,7 +28,9 @@ open build/VideoDHelper.app
 
 ## 快速开发构建产物
 
-`build-app.sh` 编译 Swift Release 可执行文件，生成 `build/VideoDHelper.app`，复制 Python 工作进程与入口脚本，并进行本机 ad-hoc 签名。
+`build-app.sh` 编译 Swift Release 应用和 `SpeakerHelper` 目标（可执行文件名 `recording-diarize`），生成 `build/VideoDHelper.app`，复制 Python 工作进程与入口脚本，并进行本机 ad-hoc 签名。开发包的 helper 位于 `Contents/Resources/recording-diarize`。
+
+SpeakerHelper 通过 SwiftPM 使用固定 revision 的 Argmax OSS / SpeakerKit，版本锁定见 `Package.resolved` 与[组件清单](../packaging/speakerkit.json)。只需复测 helper 时可运行 `zsh scripts/swift-project.sh build -c release --product recording-diarize`。正常应用构建会一并构建它，无需另装 Python 分人包。分人模型在用户选择本地区分时按需准备，不打包进应用；第三方声明与模型许可随包保留。
 
 Python 路径仍指向构建机器的项目虚拟环境，移动源码或虚拟环境后应重建。复制到“应用程序”不会自动消除依赖；当前签名不是 Developer ID 签名或 Apple 公证。
 
@@ -73,10 +75,21 @@ python3 scripts/validate-distribution.py dist/VideoDHelper.app --report build/di
 
 只需 `.app` 时加 `--app-only`。首次构建下载固定 SHA-256 的 CPython standalone 和 FFmpeg 源码，编译 FFmpeg，安装完整哈希锁定的 Python 依赖；之后复用 `build/distribution-deps/`。使用 `MACOSX_DEPLOYMENT_TARGET=14.0` 限制 wheel 选择，避免构建机器较新导致选中只能在 macOS 26 运行的 MLX。
 
-`dist/` 包含 `.app`、DMG、第三方源码包、版本 / 组件清单与校验和。发行包使用相对路径、Python `-I -B`、包内 FFmpeg 和证书库，不包含或迁移开发 `.env`，不依赖项目目录或 Homebrew。模型权重和个人配置单独保留在用户数据目录。
+日常本地预览使用独立候选目录，**不覆盖 `dist/` 中保留的正式发行产物**：
+
+```sh
+python3 scripts/build-distribution.py --app-only --channel local-preview --output-dir local-data/preview-install/candidate
+python3 scripts/validate-distribution.py local-data/preview-install/candidate/VideoDHelper.app --report local-data/preview-install/candidate-report.json
+```
+
+`--output-dir` 只改变应用及发行产物的输出位置，依赖缓存仍复用 `build/distribution-deps/`；省略时默认输出到 `dist/`。构建会替换所选输出目录内的 `VideoDHelper.app`，应先在候选位置完成验证，再按[本地预览与回退规则](../AGENTS.md#本地预览与回退)正常退出并更新日常应用。构建脚本本身不等于安装成功或 Release 已发布。
+
+完整发行构建在输出目录生成 `.app`、DMG、第三方源码包、版本 / 组件清单与校验和。发行包使用相对路径、Python `-I -B`、包内 FFmpeg 和证书库，不包含或迁移开发 `.env`，不依赖项目目录或 Homebrew。录音 helper 位于 `Contents/Resources/bin/recording-diarize`，随其他 Mach-O 一并签名与检查；`speakerkit.json`、`backend/asr_catalog.json` 和许可声明随包提供。模型权重和个人配置单独保留在用户数据目录。
 
 `runtime.json` 是发行版本、最低系统和下载摘要的来源；`packaging/requirements.lock` 固定全部传递依赖及哈希。更新依赖后需重新构建、运行安装验收，并同步第三方清单。修改版本时也同步开发构建脚本与文档。
 
 验证脚本检查所有 Mach-O 的架构、最低系统、外部动态库与运行时搜索路径、签名和符号链接，使用系统 PATH 执行包内 Metal 检查、FFmpeg 与本机模拟 API，复跑任务验证检查点不重复调用。它不调用付费模型、不需要 B 站账号。`--ui-fixture <绝对测试目录>` 可启动带延迟的本机模拟接口，供 GUI 退出 / 恢复验收；测试时用 `VIDEOHELPER_DATA_DIRECTORY` 指向该目录，避免触及个人任务。
 
 `build-distribution.py` 使用 ad-hoc 签名，不伪装 Developer ID / 公证。发行前还需执行 Finder 拖拽安装、推出 DMG 后从 `/Applications` 启动、重复开关窗口、工作进程退出与内存观察；实际记录见 [0.6 验收](validation-0.6.md)。CI 当前仍验证开发构建，完整 DMG 在本机经过独立验收后发布。
+
+语音模型管理使用固定的 MLX 资源清单与 `mlx-audio[stt]`（未安装 CUDA / vLLM 依赖），Whisper 继续使用 `mlx-whisper`。完整安装包的 `runtime-check` 同时验证两套 Qwen 模型类可导入；模型离线推理与恢复需使用真实已下载权重验收，不能仅依靠导入检查。[管理与恢复说明](local-asr-models.md)。

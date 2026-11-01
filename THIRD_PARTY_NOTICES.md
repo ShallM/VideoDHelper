@@ -11,9 +11,13 @@ Git 仓库包含源码和打包配置；0.6.0 DMG 另外携带下列运行组件
 | [CPython / python-build-standalone](https://github.com/astral-sh/python-build-standalone) | 可重定位 Python 3.12.15；PSF 及构建依赖各自许可。应用 `Contents/Resources/licenses/` 保留 Python 和构建依赖许可。 |
 | [MLX](https://github.com/ml-explore/mlx) / [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) | MLX 0.32.4、mlx-whisper 0.4.3，Apple Silicon / Metal 推理，MIT。`backend/local_models.py` 的转换布局参考其实现；[MIT 许可副本](docs/licenses/mlx-examples-MIT.txt)。 |
 | [OpenAI Whisper](https://github.com/openai/whisper) | 模型架构、下载地址、摘要与 alignment-head 元数据；模型常量用于本地校验和转换。[MIT 许可副本](docs/licenses/whisper-MIT.txt)。模型首次使用时单独准备。 |
+| [MLX Audio](https://github.com/Blaizzy/mlx-audio) | 0.6.2，MIT；提供 Apple Silicon 上的 Qwen ASR 与 ForcedAligner 推理。包内保留 wheel 许可和依赖声明。 |
+| [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) / [ForcedAligner](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) | Apache-2.0 模型；固定 MLX Community BF16 转换，来源与摘要见 `backend/asr_catalog.json`。用户在设置中单独下载，安装包不包含权重。 |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 2026.10.21 Python wheel，获取媒体和字幕；主要为 Unlicense，部分文件适用 MIT、BSD 或 ISC 等许可，完整声明保留在 wheel 的许可文件中。未使用其他项目的打包下载器二进制。 |
 | [FFmpeg](https://ffmpeg.org/) | 9.0.2，独立的 `ffmpeg` / `ffprobe` 命令行程序，由本项目从对应源码构建；LGPL 2.1 或更新版本。禁用 GPL、nonfree、version3 与自动外部库探测，不依赖 Homebrew。 |
 | [PyTorch](https://github.com/pytorch/pytorch) | 2.14.1，用于复用 `.pt` 模型时的转换；推理使用 MLX。BSD 风格主许可及所含第三方条款均保留。 |
+| [SpeakerKit / Argmax OSS](https://github.com/argmaxinc/argmax-oss-swift) | 独立的 `recording-diarize` 进程用于录音说话人区分；固定提交 `9f99b5cb6a907730543823ad271b82532782a899`，MIT，所含 swift-transformers 部分为 Apache-2.0。[MIT 副本](docs/licenses/argmax-oss-MIT.txt)、[第三方声明](docs/licenses/argmax-oss-NOTICES.txt)。默认采用 CPU 与 Neural Engine 混合计算，转录仍使用 MLX。 |
+| [SpeakerKit Core ML 模型](https://huggingface.co/argmaxinc/speakerkit-coreml) | 首次使用分人时单独下载，固定模型 revision `556fc52a13327837688f02289457cded017802e9`，CC-BY-4.0；[模型来源与许可声明](docs/licenses/speakerkit-models-NOTICE.txt)。安装包不包含权重，项目非商业许可不改变模型许可。 |
 | 其他 Python 依赖 | 完整版本及 wheel SHA-256 见 [依赖锁文件](packaging/requirements.lock)；完整清单在 Release 的 `third-party-components.json`，许可文件保留在应用各包的 `dist-info` 中。 |
 
 应用的“帮助 → 许可证与第三方组件”打开离线索引 `Contents/Resources/LICENSES.html`，包含许可证与包内相对路径。Python 的所有构建依赖许可另列于该页，不能只以主包许可替代它们。

@@ -1,0 +1,316 @@
+{
+  "date": "2026-10-29T02:00:20",
+  "scope": "recording text understanding; fixed ASR and speaker input; not ASR accuracy",
+  "version": "0.7.0 build 16",
+  "finalProtocol": "dialogue-prompts-v2.4",
+  "providerModel": "deepseek-v4.1-flash",
+  "reasoningEffort": "high",
+  "pricingPerMillionCNY": {
+    "input": 2,
+    "cachedInput": 0.04,
+    "outputIncludingReasoning": 8
+  },
+  "finalRuns": [
+    {
+      "name": "v24-1",
+      "input": "original-turbo",
+      "status": "completed",
+      "sourceSegments": 1060,
+      "sourceCharacters": 6139,
+      "contextUnits": 21,
+      "transportCharacters": 13137,
+      "elapsedSeconds": 909.603,
+      "chapters": 6,
+      "condensedRows": 87,
+      "condensedCharacters": 6269,
+      "shortRows": 0,
+      "summaryCharacters": 2594,
+      "keyPoints": 6,
+      "uncertainties": 11,
+      "metering": {
+        "httpAttempts": 12,
+        "statuses": {
+          "response": 12
+        },
+        "inputTokens": 74596,
+        "cachedInputTokens": 17280,
+        "outputTokens": 185572,
+        "reasoningTokensIncludedInOutput": 178453,
+        "knownCostCNY": 1.5998992,
+        "unknownCostAttempts": 0,
+        "phases": {
+          "dialogue_condense": 6,
+          "dialogue_review": 5,
+          "dialogue_summary": 1
+        }
+      },
+      "attemptsElapsedSeconds": 909.603,
+      "workflow": {
+        "route": "whole",
+        "promptVersion": "dialogue-prompts-v2.4",
+        "completed": true,
+        "published": true,
+        "requests": 12,
+        "checkpointHits": 0,
+        "limitCheckpointHits": 0,
+        "sourceParagraphs": 21,
+        "reviewedParagraphs": 21,
+        "rereadCount": 0,
+        "maxRereads": 6,
+        "reviewBatches": 4,
+        "reviewUnitBudget": 6,
+        "fullContextReviewBatches": 4
+      }
+    },
+    {
+      "name": "v24-2",
+      "input": "original-turbo",
+      "status": "completed",
+      "sourceSegments": 1060,
+      "sourceCharacters": 6139,
+      "contextUnits": 21,
+      "transportCharacters": 13137,
+      "elapsedSeconds": 802.436,
+      "chapters": 4,
+      "condensedRows": 86,
+      "condensedCharacters": 6139,
+      "shortRows": 0,
+      "summaryCharacters": 2632,
+      "keyPoints": 5,
+      "uncertainties": 8,
+      "metering": {
+        "httpAttempts": 12,
+        "statuses": {
+          "response": 12
+        },
+        "inputTokens": 74157,
+        "cachedInputTokens": 23552,
+        "outputTokens": 141552,
+        "reasoningTokensIncludedInOutput": 135312,
+        "knownCostCNY": 1.23456808,
+        "unknownCostAttempts": 0,
+        "phases": {
+          "dialogue_review": 6,
+          "dialogue_condense": 5,
+          "dialogue_summary": 1
+        }
+      },
+      "attemptsElapsedSeconds": 802.436,
+      "workflow": {
+        "route": "whole",
+        "promptVersion": "dialogue-prompts-v2.4",
+        "completed": true,
+        "published": true,
+        "requests": 12,
+        "checkpointHits": 0,
+        "limitCheckpointHits": 0,
+        "sourceParagraphs": 21,
+        "reviewedParagraphs": 21,
+        "rereadCount": 0,
+        "maxRereads": 6,
+        "reviewBatches": 4,
+        "reviewUnitBudget": 6,
+        "fullContextReviewBatches": 4
+      }
+    },
+    {
+      "name": "v24-resume",
+      "input": "original-turbo",
+      "status": "completed",
+      "sourceSegments": 1060,
+      "sourceCharacters": 6139,
+      "contextUnits": 21,
+      "transportCharacters": 13137,
+      "elapsedSeconds": 991.544,
+      "chapters": 6,
+      "condensedRows": 117,
+      "condensedCharacters": 6264,
+      "shortRows": 0,
+      "summaryCharacters": 2431,
+      "keyPoints": 4,
+      "uncertainties": 17,
+      "metering": {
+        "httpAttempts": 15,
+        "statuses": {
+          "response": 15
+        },
+        "inputTokens": 99829,
+        "cachedInputTokens": 46080,
+        "outputTokens": 241868,
+        "reasoningTokensIncludedInOutput": 233103,
+        "knownCostCNY": 2.0442852,
+        "unknownCostAttempts": 0,
+        "phases": {
+          "dialogue_condense": 6,
+          "dialogue_review": 6,
+          "dialogue_summary": 2,
+          "dialogue_reread": 1
+        }
+      },
+      "attemptsElapsedSeconds": 1209.923,
+      "workflow": {
+        "route": "whole",
+        "promptVersion": "dialogue-prompts-v2.4",
+        "completed": true,
+        "published": true,
+        "requests": 12,
+        "checkpointHits": 2,
+        "limitCheckpointHits": 0,
+        "sourceParagraphs": 21,
+        "reviewedParagraphs": 21,
+        "rereadCount": 1,
+        "maxRereads": 6,
+        "reviewBatches": 4,
+        "reviewUnitBudget": 6,
+        "fullContextReviewBatches": 4
+      },
+      "controlledInterruption": {
+        "boundary": "after first completed cleanup batch, before next request",
+        "inFlightRequest": false
+      }
+    },
+    {
+      "name": "heldout-v24",
+      "input": "text-only-vcsum-120",
+      "status": "failed",
+      "sourceSegments": 26,
+      "sourceCharacters": 5175,
+      "contextUnits": 9,
+      "transportCharacters": 5318,
+      "elapsedSeconds": 287.482,
+      "metering": {
+        "httpAttempts": 5,
+        "statuses": {
+          "response": 5
+        },
+        "inputTokens": 20899,
+        "cachedInputTokens": 4352,
+        "outputTokens": 58501,
+        "reasoningTokensIncludedInOutput": 53624,
+        "knownCostCNY": 0.50127608,
+        "unknownCostAttempts": 0,
+        "phases": {
+          "dialogue_summary": 2,
+          "dialogue_condense": 1,
+          "dialogue_review": 2
+        }
+      },
+      "attemptsElapsedSeconds": 287.482,
+      "workflow": {
+        "route": "whole",
+        "promptVersion": "dialogue-prompts-v2.4",
+        "completed": false,
+        "published": false,
+        "requests": 5,
+        "checkpointHits": 0,
+        "limitCheckpointHits": 0,
+        "sourceParagraphs": 9,
+        "reviewedParagraphs": 0,
+        "rereadCount": 0,
+        "maxRereads": 6,
+        "reviewBatches": 0,
+        "reviewUnitBudget": 6,
+        "fullContextReviewBatches": 0
+      }
+    },
+    {
+      "name": "synthetic-v24",
+      "input": "synthetic-text",
+      "status": "completed",
+      "sourceSegments": 18,
+      "sourceCharacters": 481,
+      "contextUnits": 2,
+      "transportCharacters": 668,
+      "elapsedSeconds": 122.868,
+      "chapters": 2,
+      "condensedRows": 9,
+      "condensedCharacters": 481,
+      "shortRows": 0,
+      "summaryCharacters": 557,
+      "keyPoints": 0,
+      "uncertainties": 1,
+      "metering": {
+        "httpAttempts": 3,
+        "statuses": {
+          "response": 3
+        },
+        "inputTokens": 4487,
+        "cachedInputTokens": 2560,
+        "outputTokens": 27601,
+        "reasoningTokensIncludedInOutput": 27003,
+        "knownCostCNY": 0.2247644,
+        "unknownCostAttempts": 0,
+        "phases": {
+          "dialogue_condense": 1,
+          "dialogue_review": 1,
+          "dialogue_summary": 1
+        }
+      },
+      "attemptsElapsedSeconds": 122.868,
+      "workflow": {
+        "route": "whole",
+        "promptVersion": "dialogue-prompts-v2.4",
+        "completed": true,
+        "published": true,
+        "requests": 3,
+        "checkpointHits": 0,
+        "limitCheckpointHits": 0,
+        "sourceParagraphs": 2,
+        "reviewedParagraphs": 2,
+        "rereadCount": 0,
+        "maxRereads": 6,
+        "reviewBatches": 1,
+        "reviewUnitBudget": 6,
+        "fullContextReviewBatches": 1
+      }
+    }
+  ],
+  "developmentAttemptsBeforeFinalProtocol": {
+    "httpAttempts": 74,
+    "statuses": {
+      "response": 72,
+      "cancelled": 2
+    },
+    "inputTokens": 420301,
+    "cachedInputTokens": 58112,
+    "outputTokens": 1064710,
+    "reasoningTokensIncludedInOutput": 913138,
+    "knownCostCNY": 8.84034248,
+    "unknownCostAttempts": 6,
+    "phases": {
+      "dialogue_condense": 46,
+      "dialogue_summary": 18,
+      "dialogue_review": 9,
+      "dialogue_reread": 1
+    }
+  },
+  "semanticGate": {
+    "passed": false,
+    "defaultForNewRecordings": "legacy",
+    "newReader": "explicit opt-in preview; not a general semantic improvement claim"
+  },
+  "verification": {
+    "pythonTests": 171,
+    "swiftTests": 87,
+    "packagedReaderTests": 40,
+    "installedBuild": 16,
+    "installedSourceRevision": "8794f94afbb90c5d9b745ac62f82b508f53172d9",
+    "rollbackBuild": 15,
+    "existingProtectedFilesChecked": 84,
+    "unchangedExceptTwoNavigationStateFiles": true
+  },
+  "offlineReplay": {
+    "status": "passed",
+    "httpRequests": 0,
+    "checkpointHits": 11,
+    "limitCheckpointHits": 1,
+    "elapsedSeconds": 0.042,
+    "tokensThisRun": 0,
+    "initialDurableCheckpointsPreserved": 2,
+    "hashAndMtimeUnchanged": true,
+    "outputEqualExceptRunAccounting": true,
+    "changedNoteFields": [
+      "tokensThisRun"
+    ]
+  }
+}

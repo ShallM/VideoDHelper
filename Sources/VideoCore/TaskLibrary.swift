@@ -16,14 +16,16 @@ public enum TaskCollection: Hashable, Sendable {
 /// Organization is separate from worker-owned job records, so progress writes
 /// cannot undo a move. Removing a project never touches task folders or results.
 public struct TaskLibrary: Codable, Sendable {
+    public let workspace: WorkspaceKind
     public private(set) var projects: [TaskProject] = []
     public private(set) var assignments: [String: String] = [:]
     public private(set) var archivedTaskIDs: Set<String> = []
-    public init() {}
+    public init(workspace: WorkspaceKind = .bilibili) { self.workspace = workspace }
 
-    private enum CodingKeys: String, CodingKey { case projects, assignments, archivedTaskIDs }
+    private enum CodingKeys: String, CodingKey { case projects, assignments, archivedTaskIDs, workspace }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        workspace = try values.decodeIfPresent(WorkspaceKind.self, forKey: .workspace) ?? .bilibili
         projects = try values.decode([TaskProject].self, forKey: .projects)
         assignments = try values.decode([String: String].self, forKey: .assignments)
         // Libraries saved before task archiving have no archive field.
@@ -31,6 +33,16 @@ public struct TaskLibrary: Codable, Sendable {
     }
 
     public static var fileURL: URL { AppStorage.root.appendingPathComponent("library.json") }
+    public static func fileURL(for workspace: WorkspaceKind, root: URL = AppStorage.root) -> URL {
+        root.appendingPathComponent(workspace.libraryFilename)
+    }
+    public static func load(workspace: WorkspaceKind, root: URL = AppStorage.root) throws -> TaskLibrary {
+        let url = fileURL(for: workspace, root: root)
+        guard FileManager.default.fileExists(atPath: url.path) else { return TaskLibrary(workspace: workspace) }
+        let value = try load(from: url)
+        guard value.workspace == workspace else { throw VideoError.toolFailed("资料库的功能页归属不一致，已保留原文件。") }
+        return value
+    }
 
     public static func load(from url: URL = fileURL) throws -> TaskLibrary {
         guard FileManager.default.fileExists(atPath: url.path) else { return TaskLibrary() }
@@ -72,6 +84,10 @@ public struct TaskLibrary: Codable, Sendable {
         if let projectID, !projects.contains(where: { $0.id == projectID }) { throw VideoError.toolFailed("找不到目标项目。") }
         assignments[taskID] = projectID
     }
+    public mutating func moveTask(_ job: ProcessingJob, to projectID: String?) throws {
+        guard job.workspace == workspace else { throw VideoError.toolFailed("不能跨功能页移动任务。") }
+        try moveTask(job.id, to: projectID)
+    }
 
     public func isArchived(_ taskID: String) -> Bool { archivedTaskIDs.contains(taskID) }
 
@@ -89,6 +105,7 @@ public struct TaskLibrary: Codable, Sendable {
     public func tasks(_ jobs: [ProcessingJob], in collection: TaskCollection, matching query: String = "") -> [ProcessingJob] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return jobs.filter { job in
+            guard job.workspace == workspace else { return false }
             let included: Bool
             switch collection {
             case .recent: included = !isArchived(job.id)

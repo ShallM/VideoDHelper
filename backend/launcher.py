@@ -30,8 +30,10 @@ def self_test():
     import torch
     import mlx.core as mx
     import mlx_whisper
+    from mlx_audio.stt.models.qwen3_asr import Model as QwenASR
+    from mlx_audio.stt.models.qwen3_forced_aligner import Model as QwenAligner
     mx.eval(mx.array([1.0, 2.0]) + 1)
-    versions = {name: importlib.metadata.version(name) for name in ("yt-dlp", "mlx", "mlx-whisper", "torch")}
+    versions = {name: importlib.metadata.version(name) for name in ("yt-dlp", "mlx", "mlx-whisper", "mlx-audio", "transformers", "torch")}
     ffmpeg = subprocess.check_output([str(RESOURCES / "bin/ffmpeg"), "-version"], text=True).splitlines()[0]
     ssl.create_default_context()
     result = {"python": platform.python_version(), "arch": platform.machine(), "isolated": bool(sys.flags.isolated),

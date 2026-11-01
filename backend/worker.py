@@ -45,6 +45,19 @@ def load_config(support, env_file=None):
 
 
 def validate_request(request):
+    kind = request.get("sourceKind", "bilibili")
+    if kind not in ("bilibili", "recording"):
+        raise UserError("任务来源类型无效。")
+    if kind == "recording":
+        if (request.get("dialogueStrategy") or "legacy") not in ("legacy", "context-v2", "meeting-v3", "meeting-baseline"):
+            raise UserError("录音理解方案无法识别，请更新应用后重试。")
+        if request.get("recordingAction", "transcribe") not in ("transcribe", "summarize", "format") or request.get("diarizationMode", "off") not in ("two", "off"):
+            raise UserError("录音处理选项无效。")
+        if request.get("recordingAction") == "format" and request.get("dialogueStrategy") not in ("meeting-v3", "meeting-baseline"):
+            raise UserError("独立标点优化仅适用于会议纪要流程。")
+        if not isinstance(request.get("title"), str) or not request["title"].strip():
+            raise UserError("录音标题无效。")
+        return
     if request.get("mediaMode") not in ("needed", "audio", "video") or type(request.get("keepMedia")) is not bool:
         raise UserError("任务的媒体选项无效。")
     if request.get("summaryStrategy", "legacy") not in ("legacy", "structured", "compact"):
@@ -62,6 +75,8 @@ def run(folder, support, env_file=None):
     record = read_json(folder / "job.json")
     if record["id"] != folder.name:
         raise UserError("任务目录与记录不匹配。")
+    if record.get("sourceKind", "bilibili") != request.get("sourceKind", "bilibili"):
+        raise UserError("任务来源与记录不匹配。")
 
     def emit(stage, message, progress=None):
         record.update(stage=stage, message=message, progress=progress, updatedAt=time.time(), state="running")
@@ -70,6 +85,10 @@ def run(folder, support, env_file=None):
 
     try:
         emit("prepare", "准备任务，检查已完成的阶段…")
+        if request.get("sourceKind") == "recording":
+            # Local ASR and diarization must not require valid cloud settings.
+            from recording import run_recording
+            return run_recording(request, record, folder, support, emit, load_config, env_file)
         # Snapshot settings at the beginning. Editing settings affects the next run, not a running transcription.
         config = load_config(support, env_file)
         config.update(taskID=record["id"], taskTitle=request["title"])
@@ -88,7 +107,8 @@ def run(folder, support, env_file=None):
         elif request["useWhisper"]:
             if media is None:
                 raise UserError("没有取得用于转录的音轨。")
-            segments = transcribe(media, request.get("whisperModel", "turbo"), folder, support, emit)
+            segments = transcribe(media, request.get("asrModelID") or request.get("whisperModel", "turbo"),
+                                  folder, support, emit, legacy=not bool(request.get("asrModelID")))
             save_transcript(folder, segments)
         else:
             segments = request["segments"]
@@ -147,10 +167,16 @@ def main():
                 return
     threading.Thread(target=watch_parent, daemon=True).start()
     parser = argparse.ArgumentParser()
-    parser.add_argument("--job", required=True)
+    operation = parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument("--job")
+    operation.add_argument("--models", choices=("list", "download", "remove", "clear"))
+    parser.add_argument("--model-id")
     parser.add_argument("--support", required=True)
     parser.add_argument("--env-file")
     args = parser.parse_args()
+    if args.models:
+        from asr_models import run_cli
+        return run_cli(args.models, args.model_id, Path(args.support))
     with (Path(args.job) / "run.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

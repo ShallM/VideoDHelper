@@ -1,0 +1,16 @@
+SpeakerKit Core ML models (downloaded separately on first use)
+
+Publisher: Argmax, Inc.
+Source: https://huggingface.co/argmaxinc/speakerkit-coreml
+Model revision: 556fc52a13327837688f02289457cded017802e9
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License text: https://creativecommons.org/licenses/by/4.0/legalcode
+
+The upstream model card declares these models CC BY 4.0 and the SpeakerKit
+Swift framework MIT. The models implement the pyannote speaker-diarization
+pipeline; model files retain their original names and contents. VideoDHelper
+does not modify these model files and does not include them in its installer.
+
+Models are retrieved from the fixed source revision into a local cache when
+speaker detection is requested. VideoDHelper's noncommercial source license
+does not replace or restrict the models' original license.

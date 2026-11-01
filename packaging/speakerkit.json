@@ -1,0 +1,12 @@
+{
+  "engine": "SpeakerKit",
+  "source": "https://github.com/argmaxinc/argmax-oss-swift",
+  "revision": "9f99b5cb6a907730543823ad271b82532782a899",
+  "license": "MIT; vendored swift-transformers Apache-2.0",
+  "modelRepository": "argmaxinc/speakerkit-coreml",
+  "modelRevision": "556fc52a13327837688f02289457cded017802e9",
+  "modelLicense": "CC-BY-4.0",
+  "modelFilesBundled": false,
+  "modelFileBytes": {"macOS14": 15468390, "macOS15OrLater": 11243231},
+  "computePolicy": "segmenter:CPU;embedder:CPU+NeuralEngine;clustering:CPU"
+}
