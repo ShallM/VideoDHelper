@@ -113,6 +113,9 @@ class ChatClient:
                 elif type(entry.get("noFinalOutput")) is bool:
                     self.known_limit_kinds[step] = "no_final_output" if entry["noFinalOutput"] else "output_limit"
 
+    def validation_error(self, error, phase):
+        return ValueError("模型结构或来源检查未通过")
+
     def prepare_validation_retry(self, body, feedback, candidate, phase):
         # Preserve historical video/v2 retry behavior. Specialized workflows can
         # carry the rejected candidate without changing these callers' prompts.
@@ -239,7 +242,7 @@ class ChatClient:
                 feedback_limit = min(1600, max(240, feedback_limit)) if type(feedback_limit) is int else 240
                 feedback = (" 检查提示：" + str(error)[:feedback_limit]) if self.config.get("summaryVersion") else ""
                 if validation_attempt:
-                    raise ValueError("模型结构或来源检查未通过") from None
+                    raise self.validation_error(error, phase) from None
 
     def _request(self, body, phase="summary"):
         # Each concurrent request owns its opener/HTTP connection.

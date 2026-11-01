@@ -16,8 +16,8 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit, OutputLimit
 from summary_v2 import estimated_tokens
 
-VERSION = "meeting-reader-v3.15"
-PROMPT_VERSION = "meeting-prompts-v1.8"
+VERSION = "meeting-reader-v3.16"
+PROMPT_VERSION = "meeting-prompts-v1.9"
 STRATEGIES = {"meeting-v3", "meeting-baseline"}
 PART_BUDGET = 240
 VALIDATION_FEEDBACK_CHARS = 1600
@@ -53,6 +53,12 @@ class MeetingChatClient(ChatClient):
         super().__init__(*args, **kwargs)
         self.input_budget, self.context_limit = input_budget, context_limit
         self.validation_retries = []
+
+    def validation_error(self, error, phase):
+        stage = {"meeting_draft": "草稿", "meeting_merge": "合并", "meeting_evidence": "证据提取",
+                 "meeting_review": "核验", "meeting_reread": "回读", "meeting_punctuation": "标点整理"}.get(phase, phase)
+        return ValueError(f"纪要{stage}在一次自动修正后仍未通过检查。原稿、成功阶段、失败候选和用量已保留。"
+                          f"具体原因：{str(error)[:VALIDATION_FEEDBACK_CHARS]}")
 
     def prepare_validation_retry(self, body, feedback, candidate, phase):
         # Diagnostics only, never treated as a successful/resumable result.
@@ -255,7 +261,7 @@ class MeetingReader(Reader):
         if reread and (value["issues"] or value["assessments"] or value["additions"]):
             raise ValueError("定向回读不能另起核验、补充无关主题或登记新疑点")
         seen = set()
-        for assessment in value["assessments"]:
+        for ai, assessment in enumerate(value["assessments"]):
             cid = assessment.get("check_id")
             if cid not in owned_checks or cid in seen or assessment.get("status") not in ("covered", "omitted", "uncertain", "invalid"):
                 raise ValueError("assessments须逐项覆盖负责的check_id且状态合法")
@@ -265,13 +271,13 @@ class MeetingReader(Reader):
                 raise ValueError("assessment引用了不存在的声明")
             if assessment["status"] == "covered" and not target_ids:
                 raise ValueError("covered必须指向实际保留该事实的声明")
-            string(assessment.get("reason"))
+            string(assessment.get("reason"), field=f"assessments[{ai}].reason")
         mutated = set()
-        for patch in value["patches"]:
+        for pi, patch in enumerate(value["patches"]):
             tid = patch.get("target_id")
             if tid not in owned_targets or tid in mutated or patch.get("action") not in ("update", "replace", "remove"):
                 raise ValueError("补丁只能修改本批负责目标，每个目标一次")
-            mutated.add(tid); string(patch.get("reason"))
+            mutated.add(tid); string(patch.get("reason"), field=f"patches[{pi}].reason")
             if not isinstance(patch.get("check_ids"), list) or any(i not in self.checks for i in patch["check_ids"]):
                 raise ValueError("补丁check_ids必须来自现有核对清单")
             target = targets[tid]
@@ -299,7 +305,8 @@ class MeetingReader(Reader):
                 if not isinstance(replacement, dict) or not required.issubset(replacement):
                     shape = '{"text":"待确认问题","u":[实际来源整数],"status":"unresolved或needs_audio"}' if target["target_kind"] == "uncertainty" else '{"text":"概览","u":[实际来源整数]}'
                     raise ValueError(f"{tid}的target_kind={target['target_kind']}，replacement必须为{shape}，不能用声明结构代替")
-                citations(replacement, allowed); string(replacement.get("text"), maximum=500 if tid == "overview" else 4000)
+                citations(replacement, allowed); string(replacement.get("text"), maximum=500 if tid == "overview" else 4000,
+                                                      field=f"patches[{pi}]({tid}).replacement.text")
                 validate_reader_text(replacement["text"], [allowed[i]["text"] for i in replacement["u"]])
                 if target["target_kind"] == "uncertainty":
                     if replacement.get("status") not in ("unresolved", "needs_audio"):
@@ -307,18 +314,24 @@ class MeetingReader(Reader):
                     if target["value"].get("status") == "needs_audio" and replacement["status"] != "needs_audio":
                         raise ValueError("需回听事项不能仅凭文字关闭")
             else:
-                validate_item(replacement, allowed, action=target["target_kind"] == "action")
+                try:
+                    validate_item(replacement, allowed, action=target["target_kind"] == "action")
+                except ValueError as error:
+                    raise ValueError(f"patches[{pi}]({tid}).replacement: {error}") from error
         chapters = {c["id"] for c in self.document["chapters"]} | {"actions", "supplement"}
-        for addition in value["additions"]:
+        for ai, addition in enumerate(value["additions"]):
             if addition.get("chapter_id") not in chapters:
                 raise ValueError("新增内容需选择已有章节、actions或supplement")
             if not isinstance(addition.get("check_ids"), list) or any(i not in owned_checks for i in addition["check_ids"]):
                 raise ValueError("补充check_ids须来自本批清单；原文中新发现的遗漏可用空数组")
-            string(addition.get("reason"))
-            validate_item(addition["item"], allowed, action=addition["chapter_id"] == "actions")
+            string(addition.get("reason"), field=f"additions[{ai}].reason")
+            try:
+                validate_item(addition["item"], allowed, action=addition["chapter_id"] == "actions")
+            except ValueError as error:
+                raise ValueError(f"additions[{ai}].item: {error}") from error
             if not addition["check_ids"] and owned_units is not None and not set(addition["item"]["u"]).intersection(owned_units):
                 raise ValueError("新发现的遗漏须引用本批负责原文，邻接背景不归本批补充")
-        for issue in value["issues"]:
+        for ii, issue in enumerate(value["issues"]):
             if issue.get("target_id") not in set(targets) | set(owned_checks) or issue.get("field") not in FIELDS or issue.get("kind") not in ISSUE_KINDS:
                 raise ValueError("疑点必须关联现有声明/核对项及明确字段")
             if issue.get("status") not in ("unresolved", "needs_audio"):
@@ -326,7 +339,7 @@ class MeetingReader(Reader):
             target = targets.get(issue["target_id"])
             if target and target["target_kind"] == "uncertainty" and target["value"].get("status") == "needs_audio" and issue["status"] != "needs_audio":
                 raise ValueError(f"{issue['target_id']}已标记需回听，关联疑点也须needs_audio，不能用文字回读关闭")
-            string(issue.get("question")); citations(issue, allowed)
+            string(issue.get("question"), field=f"issues[{ii}].question"); citations(issue, allowed)
             validate_reader_text(issue["question"], [allowed[i]["text"] for i in issue["u"]])
             if not isinstance(issue.get("query"), str) or len(issue["query"]) > 160:
                 raise ValueError("query须为较短字面检索词或空字符串")
@@ -335,7 +348,7 @@ class MeetingReader(Reader):
                 raise ValueError("回读须明确是否解决或需回听")
             if value["status"] == "resolved" and any(t["target_kind"] == "uncertainty" and t["value"].get("status") == "needs_audio" for t in targets.values()):
                 raise ValueError("需回听目标不能仅凭文字标为resolved")
-            string(value.get("reason"))
+            string(value.get("reason"), field="reason")
             if value["status"] == "resolved" and not value["patches"]:
                 if not value.get("evidence"):
                     raise ValueError("无正文修订的resolved也须提供evidence逐字证据")

@@ -7,7 +7,7 @@ import copy
 
 from dialogue_reader import citations, validate_reader_text
 
-VERSION = "meeting-products-v1.9"
+VERSION = "meeting-products-v1.10"
 KINDS = {"fact", "opinion", "question_answer", "proposal", "decision", "action"}
 STATES = {"current", "pending", "completed", "withdrawn", "uncertain", "not_applicable"}
 FIELDS = {"text", "kind", "state", "conditions", "scope", "speaker", "owner", "due", "number"}
@@ -34,7 +34,10 @@ SEMANTIC_EXAMPLES = """以下仅说明表达边界，不是本次录音事实，
 
 ITEM_SCHEMA = """普通条目只需正文和来源：
 {"text":"完整保留实质内容、限制和不确定性，不写说话人前缀","evidence":[{"first_part":0,"last_part":2}]}。
-仅在有实际含义时添加字段，不重复填空字段：kind(fact/opinion/question_answer/proposal/decision/action)、state(current/pending/completed/withdrawn/uncertain/not_applicable)、conditions(前提数组)、scope(适用范围)、speaker(A/B/unknown/none)、attribution_parts(归属来源编号)。
+仅在有实际含义时添加字段，不重复填空字段。字段类型固定，不要混用字符串与数组：
+text为非空字符串(最多4000字符)；kind为字符串(fact/opinion/question_answer/proposal/decision/action)；state为字符串(current/pending/completed/withdrawn/uncertain/not_applicable)。
+conditions为字符串数组，每项一个前提(最多12项，每项最多1000字符)，无条件为[]。scope为单个非空字符串或null(最多1500字符)，例如"scope":"仅本次试验"，不能写成["仅本次试验"]；多个适用范围在同一字符串中清楚表达，不省略限制。
+speaker为字符串(A/B/unknown/none)；attribution_parts为整数数组；owner为字符串A/B或null；due为原文期限的单个非空字符串或null(最多300字符)，不是数组或日期对象。无明确依据时省略这些可选字段，不用空字符串代替null。
 未填kind表示普通陈述，未填state表示不标记完成状态，未填speaker表示中性概括；这些默认值不表示事实已经核实。提议、决定和状态变化必须明确写出kind/state，必要条件与范围必须在正文或对应字段中保留，不能只留在引文中。正文与字段不重复堆叠。
 action_items中的条目必须填写state；无法确定用uncertain。kind可省略，由行动列表确定。行动还可填owner(A/B)和due(原文期限)，无明确依据就省略，不要求填写null。
 speaker=none仅用于不向某位说话人归属的中性概括。speaker=A或B时，attribution_parts必须列出引文内支持归属且标记为同一人的part编号；其他情况为空数组。不能用相邻片段猜人。
@@ -94,11 +97,22 @@ after必须是所选part正文中只出现一次的连续原字短语，标点�
 """
 
 
-def string(value, *, nullable=False, maximum=4000):
+def json_type(value):
+    return ("null" if value is None else "boolean" if isinstance(value, bool) else
+            "string" if isinstance(value, str) else "array" if isinstance(value, list) else
+            "object" if isinstance(value, dict) else "number" if isinstance(value, (int, float)) else type(value).__name__)
+
+
+def string(value, *, nullable=False, maximum=4000, field="text"):
     if nullable and value is None:
         return
-    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
-        raise ValueError("需要非空且长度合理的文本字段")
+    expected = "非空string" + ("或null" if nullable else "")
+    if not isinstance(value, str):
+        raise ValueError(f"{field}须为{expected}；实际类型为{json_type(value)}")
+    if not value.strip():
+        raise ValueError(f"{field}须为{expected}；实际为空字符串或仅含空白")
+    if len(value) > maximum:
+        raise ValueError(f"{field}最多{maximum}字符；实际{len(value)}字符，须保留实质内容与限制")
 
 
 def anchor(proof, units):
@@ -127,7 +141,7 @@ def anchor(proof, units):
     # Older stored diagnostics/tests may contain a quote. Never fuzzy-match or
     # silently correct it (one missing negation can reverse a statement).
     quote = proof.get("quote")
-    string(quote, maximum=2400)
+    string(quote, maximum=2400, field="evidence.quote")
     start = unit["text"].find(quote)
     if start < 0 or start != unit["text"].rfind(quote):
         raise ValueError("evidence.quote须逐字、连续且唯一匹配原文；不能补标点，请选更明确的原句")
@@ -189,7 +203,7 @@ def validate_items(entries, units):
             detail = error.compact if isinstance(error, AttributionError) else str(error)
             errors.append(f"{path}: {detail}")
     if errors:
-        raise ValueError("声明校验未通过，共" + str(len(errors)) + "处。只选真实来源与同标签归属，未知不猜人。" + "；".join(errors))
+        raise ValueError("声明校验未通过，共" + str(len(errors)) + "处。按下列位置仅修正出错字段，保留其他有效内容；不猜测归属。" + "；".join(errors))
 
 
 def validate_evidence_item(item, units):
@@ -215,21 +229,24 @@ def validate_item(item, units, *, action=False):
     defaults = {**OPTIONAL_DEFAULTS, "kind": "action" if action else "fact"}
     for key, value in defaults.items():
         item.setdefault(key, copy.deepcopy(value))
-    if item.get("kind") not in KINDS or item.get("state") not in STATES:
-        raise ValueError("kind或state不是支持的声明类型/状态")
+    for field, choices in (("kind", KINDS), ("state", STATES)):
+        if not isinstance(item[field], str) or item[field] not in choices:
+            raise ValueError(f"{field}须为string，取值为{'/'.join(sorted(choices))}；实际类型为{json_type(item[field])}")
     if action and item["kind"] != "action":
         raise ValueError("action_items只容纳明确行动；建议放在章节proposal中")
     if not action and item["kind"] == "action":
         raise ValueError("明确行动放入action_items，不在章节重复")
     conditions = item.get("conditions")
     if not isinstance(conditions, list) or len(conditions) > 12:
-        raise ValueError("conditions须为空数组或必要条件列表")
-    for condition in conditions:
-        string(condition, maximum=1000)
-    string(item.get("scope"), nullable=True, maximum=1500)
-    if item["owner"] not in (None, "A", "B") or (not action and (item["owner"] is not None or item["due"] is not None)):
-        raise ValueError("只有行动可设置owner/due，owner仅A/B或null")
-    string(item["due"], nullable=True, maximum=300)
+        raise ValueError(f"conditions须为string数组，最多12项，无条件用[]；实际类型为{json_type(conditions)}")
+    for i, condition in enumerate(conditions):
+        string(condition, maximum=1000, field=f"conditions[{i}]")
+    string(item.get("scope"), nullable=True, maximum=1500, field="scope")
+    if item["owner"] not in (None, "A", "B"):
+        raise ValueError(f"owner须为string A/B或null；实际类型为{json_type(item['owner'])}")
+    string(item["due"], nullable=True, maximum=300, field="due")
+    if not action and (item["owner"] is not None or item["due"] is not None):
+        raise ValueError("只有action_items中的行动可设置owner/due，普通声明须省略或为null")
     proofs = evidence_anchors(item.get("evidence"), units)
     item["evidence"] = proofs
     item["u"] = sorted({p["unit"] for p in proofs})
@@ -237,8 +254,10 @@ def validate_item(item, units, *, action=False):
     evidence_parts = {i for p in proofs for i in p["parts"]}
     attributed = item.get("attribution_parts")
     speaker = item.get("speaker")
-    if speaker not in ("A", "B", "unknown", "none") or not isinstance(attributed, list):
-        raise ValueError("speaker或attribution_parts无效")
+    if speaker not in ("A", "B", "unknown", "none"):
+        raise ValueError(f"speaker须为string A/B/unknown/none；实际类型为{json_type(speaker)}")
+    if not isinstance(attributed, list):
+        raise ValueError(f"attribution_parts须为整数数组；实际类型为{json_type(attributed)}")
     if speaker in ("A", "B"):
         invalid = [i for i in attributed if type(i) is not int or i not in evidence_parts or all_parts[i]["speaker"] != speaker]
         if not attributed or invalid:
@@ -264,14 +283,14 @@ def validate_item(item, units, *, action=False):
 def validate_document(value, units):
     units = {u["id"]: u for u in units}
     overview = value["overview"]
-    citations(overview, units); string(overview["text"], maximum=500)
+    citations(overview, units); string(overview.get("text"), maximum=500, field="overview.text")
     validate_reader_text(overview["text"], [units[i]["text"] for i in overview["u"]])
     if not isinstance(value["chapters"], list) or not 1 <= len(value["chapters"]) <= 32:
         raise ValueError("纪要需要1至32个实际主题")
     count = 0
     entries = []
     for ci, chapter in enumerate(value["chapters"]):
-        string(chapter["title"], maximum=160)
+        string(chapter.get("title"), maximum=160, field=f"chapters[{ci}].title")
         if not isinstance(chapter["claims"], list) or not chapter["claims"]:
             raise ValueError("每个主题需要实质声明")
         for ii, item in enumerate(chapter["claims"]):
@@ -285,8 +304,8 @@ def validate_document(value, units):
         validate_reader_text(chapter["title"], [units[i]["text"] for c in chapter["claims"] for i in c["u"]])
     if not isinstance(value["uncertainties"], list) or len(value["uncertainties"]) > 60:
         raise ValueError("uncertainties须为有限列表")
-    for item in value["uncertainties"]:
-        citations(item, units); string(item["text"])
+    for i, item in enumerate(value["uncertainties"]):
+        citations(item, units); string(item.get("text"), field=f"uncertainties[{i}].text")
         if item.get("status") not in ("unresolved", "needs_audio"):
             raise ValueError("疑点须为unresolved或needs_audio")
         validate_reader_text(item["text"], [units[i]["text"] for i in item["u"]])

@@ -339,6 +339,98 @@ class MeetingTests(unittest.TestCase):
                 saved = read_json(e.client.directory / e.client.validation_retries[0]["candidatePath"])
                 self.assertEqual(json.loads(saved["candidate"]), original)
 
+    def test_scope_array_feedback_repairs_only_that_field_and_reuses_result(self):
+        original = None
+        drafts = []
+        def respond(client, body, phase, payload):
+            nonlocal original
+            if phase != "meeting_draft": return None
+            drafts.append(body)
+            if len(drafts) == 1:
+                original = compact_evidence(document(self.engine.units))
+                original["chapters"][0]["claims"][0].update(scope=["本次试验"], conditions=["测试通过"])
+                return self.envelope(original)
+            feedback = body["messages"][-1]["content"]
+            self.assertIn("chapters[0].claims[0]: scope须为非空string或null；实际类型为array", feedback)
+            self.assertEqual(json.loads(body["messages"][2]["content"]), original)
+            fixed = copy.deepcopy(original)
+            fixed["chapters"][0]["claims"][0]["scope"] = "本次试验"
+            return self.envelope(fixed)
+        self.hook = respond
+        engine, (notes, _) = self.run_reader(dialogueStrategy="meeting-baseline")
+        self.assertEqual(len(drafts), 2)
+        metadata = notes["chapters"][0]["claims"][0]["metadata"]
+        for key in ("text", "conditions", "state", "speaker", "attribution_parts"):
+            self.assertEqual(metadata[key], original["chapters"][0]["claims"][0][key])
+        self.assertEqual(metadata["scope"], "本次试验")
+        before = len(self.requests)
+        self.run_reader(dialogueStrategy="meeting-baseline")
+        self.assertEqual(len(self.requests), before)
+        self.assertEqual(len(engine.client.validation_retries), 1)
+
+    def test_invalid_field_types_report_field_and_never_coerce(self):
+        e = self.reader()
+        cases = [("scope", ["范围"], "scope.*array"), ("scope", " ", "scope.*空白"),
+                 ("conditions", "前提", "conditions.*string数组"),
+                 ("conditions", [False], r"conditions\[0\].*boolean"),
+                 ("kind", [], "kind.*array"), ("state", {}, "state.*object"),
+                 ("due", ["明天"], "due.*array"), ("owner", {}, "owner.*object"),
+                 ("speaker", None, "speaker.*null"), ("attribution_parts", "0", "attribution_parts.*string"),
+                 ("text", 123, "text.*number"), ("scope", "界" * 1501, "scope.*1500.*1501")]
+        for key, value, message in cases:
+            with self.subTest(field=key, value=value):
+                claim = item(e.units[0], **{key: value})
+                with self.assertRaisesRegex(ValueError, message): validate_item(claim, e.lookup)
+                self.assertEqual(claim[key], value)
+        for scope in (None, "本次试验"):
+            validate_item(item(e.units[0], scope=scope), e.lookup)
+        sparse = {"text": "资料已经具备。", "evidence": [{"first_part": 0, "last_part": 0}]}
+        validate_item(sparse, e.lookup)
+        self.assertIsNone(sparse["scope"])
+
+    def test_unfixed_scope_fails_after_one_repair_without_publishing(self):
+        def respond(client, body, phase, payload):
+            if phase == "meeting_draft":
+                value = document(self.engine.units)
+                value["chapters"][0]["claims"][0]["scope"] = ["范围"]
+                return self.envelope(value)
+        self.hook = respond
+        with self.assertRaisesRegex(ValueError, "一次自动修正后.*scope.*array"):
+            self.run_reader()
+        self.assertEqual(len(self.requests), 2)
+        self.assertFalse((self.folder / "dialogue-results.json").exists())
+        self.assertEqual(read_json(self.folder / "meeting-validation.json")["failureCount"], 2)
+
+    def test_repair_field_error_includes_patch_or_addition_location(self):
+        e = self.prepared()
+        targets = e.meeting_targets()
+        review = empty_review()
+        review["patches"] = [{"target_id": "claim-0", "action": "update", "changes": {"scope": ["本次"]},
+                              "reason": "范围澄清", "check_ids": []}]
+        with self.assertRaisesRegex(ValueError, r"patches\[0\].*claim-0.*scope.*array"):
+            e.validate_repair(review, e.units, targets, set(targets), set(e.checks))
+        review = empty_review()
+        review["additions"] = [{"chapter_id": "supplement", "item": item(e.units[0], conditions=[12]),
+                                "reason": "补充前提", "check_ids": []}]
+        with self.assertRaisesRegex(ValueError, r"additions\[0\].item.*conditions\[0\].*number"):
+            e.validate_repair(review, e.units, targets, set(targets), set(e.checks))
+
+    def test_final_error_reports_latest_parse_failure_not_previous_field_failure(self):
+        def respond(client, body, phase, payload):
+            if len(self.requests) == 1:
+                value = document(self.engine.units)
+                value["chapters"][0]["claims"][0]["scope"] = []
+                return self.envelope(value)
+            result = self.envelope({})
+            result["choices"][0]["message"]["content"] = "{"
+            return result
+        self.hook = respond
+        with self.assertRaises(ValueError) as failure:
+            self.run_reader()
+        self.assertIn("Expecting property name", str(failure.exception))
+        self.assertNotIn("scope", str(failure.exception))
+        self.assertEqual(len(self.requests), 2)
+
     def test_shared_client_keeps_historical_retry_messages(self):
         client = ChatClient(self.config, self.folder / "legacy-client", lambda *a: None)
         requests = []
