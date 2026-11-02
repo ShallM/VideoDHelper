@@ -21,9 +21,10 @@ final class AudioPlayback: ObservableObject {
         observer = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if time.seconds.isFinite { position = max(0, time.seconds) }
-                if let value = player.currentItem?.duration.seconds, value.isFinite { duration = max(0, value) }
-                isPlaying = player.rate != 0
+                if time.seconds.isFinite, position != max(0, time.seconds) { position = max(0, time.seconds) }
+                if let value = player.currentItem?.duration.seconds, value.isFinite, duration != max(0, value) { duration = max(0, value) }
+                let playing = player.rate != 0
+                if isPlaying != playing { isPlaying = playing }
             }
         }
         ended = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in

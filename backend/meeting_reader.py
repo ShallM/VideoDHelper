@@ -556,14 +556,14 @@ class MeetingReader(Reader):
         complete = False
         try:
             write_json(self.folder / "meeting-context.json", {"identity": self.identity, "units": self.units})
-            self.emit("summary", "全文阅读，生成详细主题纪要与明确行动…")
+            self.emit("meeting_draft", "全文阅读，生成详细主题纪要与明确行动…")
             self.identify(self.stage("draft", lambda: self.draft(self.units)))
             write_json(self.folder / "meeting-draft.json", {"identity": self.identity, "document": self.document})
             if self.strategy == "meeting-v3":
-                self.emit("review", "独立阅读原文，整理关键事实、状态与条件证据…")
+                self.emit("meeting_evidence", "独立阅读原文，整理关键事实、状态与条件证据…")
                 self.stage("evidence", lambda: self.inventory(self.units))
                 write_json(self.folder / "meeting-evidence.json", {"identity": self.identity, "checks": list(self.checks.values()), "coverage": self.source_coverage})
-                self.emit("review", "对照原文与独立证据，检查遗漏、状态和归属…")
+                self.emit("meeting_review", "对照原文与独立证据，检查遗漏、状态和归属…")
                 self.stage("review", lambda: self.review_range(self.units))
                 self.stage("reread", self.reread)
             # A usable reading copy is deterministic. Optional punctuation is a
@@ -573,6 +573,7 @@ class MeetingReader(Reader):
             notes, rows = self.outputs()
             if callback := self.config.get("beforePublish"):
                 callback()
+            self.emit("save", "核验已结束，正在保存纪要、整理稿与来源映射…")
             write_json(self.folder / "dialogue-results.json", {"schemaVersion": 2, "generationID": self.identity,
                        "strategy": self.strategy, "notes": notes, "condensed": rows,
                        "formatting": {"status": "not_requested", "message": "原话已连续排版；可单独优化断句与标点。"}})

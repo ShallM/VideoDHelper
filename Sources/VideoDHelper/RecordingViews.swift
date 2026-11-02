@@ -48,13 +48,16 @@ struct AudioPlayerBar: View {
         VStack(spacing: 8) {
             Divider()
             HStack(spacing: 14) {
-                Button(action: player.toggle) { Image(systemName: player.isPlaying ? "pause.fill" : "play.fill") }
+                Button(action: player.toggle) {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(width: 32, height: 28).contentShape(Rectangle())
+                }
                     .buttonStyle(.borderless).accessibilityLabel(player.isPlaying ? "暂停录音" : "播放录音")
                     .disabled(!player.isLoaded)
                 Slider(value: Binding(get: { min(player.position, max(1, player.duration)) }, set: { player.seek(to: $0) }), in: 0...max(1, player.duration))
                     .accessibilityLabel("录音播放进度").disabled(!player.isLoaded)
                 Text("\(TranscriptExport.timestamp(player.position)) / \(TranscriptExport.timestamp(player.duration))")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary).fixedSize()
                 Picker("播放速度", selection: $player.speed) {
                     Text("0.75×").tag(Float(0.75)); Text("1×").tag(Float(1)); Text("1.25×").tag(Float(1.25))
                     Text("1.5×").tag(Float(1.5)); Text("2×").tag(Float(2))

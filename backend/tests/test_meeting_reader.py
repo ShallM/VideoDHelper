@@ -112,6 +112,15 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(again["chapters"], notes["chapters"])
         self.assertEqual(again["tokensThisRun"], 0)
 
+    def test_activity_stages_separate_evidence_review_and_publication(self):
+        engine = self.reader()
+        events = []
+        engine.emit = lambda stage, message, progress=None: events.append(stage)
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            engine.run()
+        self.assertEqual(events, ["meeting_draft", "meeting_evidence", "meeting_review", "save"])
+        self.assertTrue((self.folder / "dialogue-results.json").exists())
+
     def test_baseline_does_not_review_but_uses_same_draft_and_readable_dialogue(self):
         _, (notes, _) = self.run_reader(dialogueStrategy="meeting-baseline")
         self.assertEqual([p for p, _, _ in self.requests], ["meeting_draft"])

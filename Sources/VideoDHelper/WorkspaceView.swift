@@ -41,6 +41,9 @@ struct WorkspacePage: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 Divider()
+                if model.isBusy, let activity = model.activity {
+                    ProcessingStatusView(activity: activity, recording: model.isRecording, cancel: model.cancel)
+                }
                 if model.metadata != nil {
                     DisclosureGroup("处理选项", isExpanded: $optionsExpanded) { options.padding(.top, 12) }
                         .font(.headline).padding(20)
@@ -441,7 +444,7 @@ struct WorkspacePage: View {
                 } else if model.newTaskProjectID != nil {
                     Label("保存到「\(model.collectionTitle)」", systemImage: "folder")
                 }
-            }.font(.caption).foregroundStyle(.secondary)
+            }.font(.system(size: 13)).foregroundStyle(.secondary)
             if model.isRecording {
                 HStack(spacing: 12) {
                     Label(model.dialogueStrategyLabel, systemImage: "text.book.closed")
@@ -466,7 +469,7 @@ struct WorkspacePage: View {
                 } label: { Label("新建对照总结", systemImage: "square.on.square") }
                     .disabled(model.isBusy || otherIsBusy || model.currentJobIsArchived)
             }
-        }.padding(24)
+        }.padding(.horizontal, 24).padding(.vertical, 18)
     }
 
     private var emptyState: some View {
@@ -557,6 +560,7 @@ struct WorkspacePage: View {
                         notesView(notes)
                     } else { pendingText }
                 }.font(.system(size: CGFloat(preferences.value.general.textSize)))
+                    .frame(maxWidth: 920, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 26).padding(.bottom, 24)
             }.id("\(model.currentJob?.id ?? model.title)-\(model.selectedTab)")
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -648,15 +652,24 @@ struct WorkspacePage: View {
         }
     }
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if model.isBusy, let progress = model.progress { ProgressView(value: progress).tint(.teal) }
-            HStack(spacing: 10) {
-                if model.isBusy { ProgressView().controlSize(.small) }
-                else { Image(systemName: model.currentJob?.state == "completed" ? "checkmark.circle.fill" : "circle.fill").foregroundStyle(.teal).font(.caption) }
-                Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                Spacer()
-                if model.isBusy { Button("取消", action: model.cancel).buttonStyle(.borderless) }
+        HStack(alignment: .top, spacing: 10) {
+            if model.isBusy {
+                Label("原稿和已完成的结果可以继续阅读。", systemImage: "doc.text")
+                    .foregroundStyle(.secondary)
+            } else {
+                Image(systemName: failed ? "exclamationmark.circle.fill" : model.currentJob?.state == "completed" ? "checkmark.circle.fill" : "info.circle")
+                    .foregroundStyle(failed ? .orange : .teal)
+                Text(model.status).foregroundStyle(.secondary).lineLimit(3)
+                    .textSelection(.enabled).help(model.status)
+                Spacer(minLength: 8)
+                if let activity = model.activity, activity.endedAt != nil {
+                    Text("本次 \(ProcessingActivity.duration(activity.elapsed()))").monospacedDigit().foregroundStyle(.secondary)
+                }
+                if failed {
+                    Button("查看详情") { model.error = model.status }.buttonStyle(.borderless)
+                }
             }
-        }.padding(14)
+        }.font(.system(size: 13)).padding(.horizontal, 20).padding(.vertical, 12)
     }
+    private var failed: Bool { model.activity?.outcome == .failed || model.currentJob?.state == "failed" }
 }
