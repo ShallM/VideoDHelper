@@ -1032,6 +1032,24 @@ class MeetingTests(unittest.TestCase):
         for config in ({"dialogueMaxOutputTokens": 262145}, {"dialogueOutputTokens": 262144, "dialogueMaxOutputTokens": 131072}):
             with self.assertRaises(UserError): self.route_reader(**config)
 
+    def test_pro_uses_same_meeting_budgets_and_json_mode_without_changing_frozen_reader(self):
+        e = self.route_reader(model="deepseek-v4-pro", reasoningEffort="high")
+        self.assertEqual((e.initial_output, e.max_output), (131072, 262144))
+        self.assertTrue(e.config["jsonObjectMode"])
+        self.assertEqual(e.client.reasoning_effort, "high")
+        self.hook = lambda *args: self.envelope({"ok": True})
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            e.call("预算测试", {}, lambda v: self.assertTrue(v["ok"]), "meeting_draft")
+        body = self.requests[0][2]
+        self.assertEqual(body["model"], "deepseek-v4-pro")
+        self.assertEqual(body["max_tokens"], 131072)
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        frozen = Reader(transcript(), "预算测试", {"baseURL": "https://api.icompify.com/v1", "model": "deepseek-v4-pro",
+                        "apiKey": "test-only", "reasoningEffort": "high"}, self.folder, lambda *a: None)
+        self.assertEqual((frozen.initial_output, frozen.max_output), (32768, 32768))
+        self.assertFalse(frozen.config["jsonObjectMode"])
+        self.assertFalse(self.route_reader(model="deepseek-v4-pro", jsonObjectMode=False).config["jsonObjectMode"])
+
     def test_new_output_budgets_are_sent_and_successful_replay_has_no_new_requests(self):
         self.hook = lambda client, body, phase, payload: (self.envelope({"ok": True}) if body["max_tokens"] == 262144 else
             {"choices": [{"finish_reason": "length", "message": {"reasoning_content": "not retained"}}],

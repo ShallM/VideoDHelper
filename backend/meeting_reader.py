@@ -85,9 +85,12 @@ class MeetingReader(Reader):
         # Initialize shared context separately, then validate this workflow's
         # budgets and include the effective pair in its own checkpoint identity.
         budget_fields = {"dialogueOutputTokens", "dialogueMaxOutputTokens"}
-        super().__init__(segments, title, {k: v for k, v in config.items() if k not in budget_fields}, folder, emit)
         current_route = (urlsplit(config.get("baseURL", "")).hostname == "api.icompify.com"
-                         and config.get("model") == "deepseek-v4.1-flash")
+                         and config.get("model") in ("deepseek-v4.1-flash", "deepseek-v4-pro"))
+        shared_config = {k: v for k, v in config.items() if k not in budget_fields}
+        if current_route:
+            shared_config.setdefault("jsonObjectMode", True)
+        super().__init__(segments, title, shared_config, folder, emit)
         self.initial_output = config.get("dialogueOutputTokens", 131072 if current_route else self.initial_output)
         self.max_output = config.get("dialogueMaxOutputTokens", 262144 if current_route else self.initial_output)
         if (type(self.initial_output) is not int or type(self.max_output) is not int
