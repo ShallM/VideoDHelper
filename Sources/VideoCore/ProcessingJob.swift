@@ -156,6 +156,7 @@ public struct ProcessingRequest: Codable, Sendable {
     public var diarizationMode: String?
     /// Missing on older recordings: their original reader and checkpoints remain in use.
     public var dialogueStrategy: String?
+    public var recordingContext: String?
     public var effectiveDialogueStrategy: String { dialogueStrategy ?? DialogueStrategy.legacy.rawValue }
     public init(title: String, url: String, source: String, segments: [TranscriptSegment], useWhisper: Bool,
                 mediaMode: String, keepMedia: Bool, videoFormatID: String, audioFormatID: String, videoIncludesAudio: Bool,
@@ -172,6 +173,9 @@ public enum DialogueStrategy: String, CaseIterable, Codable, Sendable {
     case contextV2 = "context-v2"
     case meetingV3 = "meeting-v3"
     case meetingBaseline = "meeting-baseline"
+    case meetingV4 = "meeting-v4"
+
+    public var supportsContext: Bool { [.meetingV3, .meetingBaseline, .meetingV4].contains(self) }
 
     // The new reader stays opt-in until semantic regression gates are met.
     public static let defaultForNewTasks: DialogueStrategy = .legacy
@@ -180,7 +184,8 @@ public enum DialogueStrategy: String, CaseIterable, Codable, Sendable {
         switch value {
         case nil, Self.legacy.rawValue: return "旧版对话流程"
         case Self.contextV2.rawValue: return "全文对话理解 · 预览"
-        case Self.meetingV3.rawValue: return "会议纪要 · 预览"
+        case Self.meetingV3.rawValue: return "会议纪要 · 上一版"
+        case Self.meetingV4.rawValue: return "任务理解 · 预览"
         case Self.meetingBaseline.rawValue: return "全文纪要 · 对照基线"
         default: return "其他对话流程"
         }
@@ -256,7 +261,8 @@ public struct StudyNotes: Codable, Sendable {
     public var action_items: [CitedText]? = nil
     public var evidenceItemCount: Int? = nil
     public var assessmentCount: Int? = nil
-    public var isMeeting: Bool { ["meeting-v3", "meeting-baseline"].contains(summaryStrategy ?? "") }
+    public var recordingContext: String? = nil
+    public var isMeeting: Bool { ["meeting-v3", "meeting-baseline", "meeting-v4"].contains(summaryStrategy ?? "") }
 }
 
 /// One publication generation: notes and cleaned dialogue are always read together.
@@ -289,7 +295,7 @@ public struct RecordingResults: Sendable {
                 throw VideoError.toolFailed("录音成果版本无法读取，已保留原文件。")
             }
             let expected = bundle.schemaVersion == 1 ? DialogueStrategy.contextV2.rawValue : bundle.strategy
-            guard bundle.schemaVersion == 1 || (["meeting-v3", "meeting-baseline"].contains(expected ?? "") && bundle.notes.summaryStrategy == expected) else {
+            guard bundle.schemaVersion == 1 || (["meeting-v3", "meeting-baseline", "meeting-v4"].contains(expected ?? "") && bundle.notes.summaryStrategy == expected) else {
                 throw VideoError.toolFailed("录音成果中的流程标识不一致，已保留原文件。")
             }
             let requestURL = directory.appendingPathComponent("request.json")

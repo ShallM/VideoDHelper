@@ -297,6 +297,8 @@ def export_dialogue(folder, title, segments, names, notes=None, condensed=None):
     write_text(folder / "dialogue-transcript.txt", raw + "\n")
     if notes is None: return
     lines = [f"# {title}", "来源：本地录音", f"整理模型：{notes['model']}", "## 对话概览", display_text(notes["overview"], names)]
+    if notes.get("recordingContext"):
+        lines[3:3] = ["## 用户补充背景（不是录音原话）", notes["recordingContext"]]
     if notes.get("overviewSourceIDs"):
         lines.append(f"录音时间：{refs(notes['overviewSourceIDs'])}")
     for chapter in notes["chapters"]:
@@ -344,10 +346,10 @@ def run_recording(request, record, folder, support, emit, load_config, env_file=
                       summaryReview=request.get("summaryReview", True), sourceRevision=revision,
                       recordingRevision=read_json(folder / "transcript-edits.json")["revision"] if (folder / "transcript-edits.json").exists() else "original")
         strategy = request.get("dialogueStrategy") or "legacy"
-        if strategy in ("context-v2", "meeting-v3", "meeting-baseline"):
+        if strategy in ("context-v2", "meeting-v3", "meeting-baseline", "meeting-v4"):
             # Derived context depends on acoustic boundaries as well as text.
             # Display names are deliberately excluded: a rename is presentation.
-            config.update(dialogueStrategy=strategy, transcriptIdentity=digest(segments),
+            config.update(dialogueStrategy=strategy, recordingContext=request.get("recordingContext"), transcriptIdentity=digest(segments),
                           diarizationIdentity=digest(read_json(folder / "diarization.json")) if (folder / "diarization.json").exists() else None)
             generation = digest(request)
             def before_publish():
@@ -369,7 +371,7 @@ def run_recording(request, record, folder, support, emit, load_config, env_file=
         notes, condensed = summarize(segments, request["title"], config, folder, emit)
         export_dialogue(folder, request["title"], segments, names, notes, condensed)
         message = "对话原稿、整理对话与总结已保存。"
-        if strategy in ("meeting-v3", "meeting-baseline"):
+        if strategy in ("meeting-v3", "meeting-baseline", "meeting-v4"):
             formatting = read_json(folder / "dialogue-results.json").get("formatting", {})
             message = (formatting.get("message", message) if request.get("recordingAction") == "format"
                        else "纪要已保存；整理稿保留原话，可在“整理对话”中单独优化断句与标点。")

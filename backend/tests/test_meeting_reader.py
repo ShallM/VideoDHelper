@@ -720,43 +720,50 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(e.document["chapters"][0]["claims"][1], unrelated)
 
     def test_input_limit_splits_complete_responsibility_ranges_and_preserves_end(self):
-        # Each source is separated by a genuine gap; no arbitrary character cuts.
-        segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
-                     "text": f"第{i}项资料已具备。", "speaker": "B"} for i in range(8)]
-        e = self.reader(segments)
-        def constrained(prompt, payload, validator, phase):
-            ids = [int(i) for i in re.findall(r"\[u(\d+)\]", payload.get("sources", ""))]
-            if phase in ("meeting_draft", "meeting_evidence") and len(ids) > 2:
-                raise InputContextLimit("synthetic context limit")
-            if phase == "meeting_review" and len(payload["owned_checks"]) > 2:
-                raise InputContextLimit("synthetic review limit")
-            units = [u for u in e.units if u["id"] in ids]
-            if phase == "meeting_merge":
-                docs = payload["partial_documents"]
-                self.assertTrue(all("quote" not in proof for d in docs for c in d["chapters"]
-                                    for claim in c["claims"] for proof in claim["evidence"]))
-                value = {"overview": docs[0]["overview"], "chapters": [c for d in docs for c in d["chapters"]],
-                         "action_items": [], "uncertainties": []}
-            elif phase == "meeting_draft":
-                value = document(units)
-                value["chapters"][0]["claims"] = [item(u, text=u["text"]) for u in units]
-            elif phase == "meeting_evidence":
-                value = {"items": [item(u, text=u["text"]) for u in units],
-                         "coverage": [{"unit": i, "disposition": "substantive"} for i in payload["owned_units"]]}
-            elif phase == "meeting_review":
-                value = empty_review(payload["owned_checks"], payload["owned_targets"])
-            else:
-                raise AssertionError(phase)
-            validator(value)
-            return value
-        with patch.object(e, "call", side_effect=constrained):
-            e.identify(e.draft(e.units)); e.inventory(e.units); e.review_range(e.units)
-        self.assertEqual(e.route, "hierarchical")
-        self.assertEqual([c["u"][0] for ch in e.document["chapters"] for c in ch["claims"]], list(range(8)))
-        self.assertEqual([u for c in e.source_coverage for u in c["ownedUnits"]], list(range(8)))
-        self.assertEqual(e.reviewed, set(range(8)))
-        self.assertEqual(len(e.assessments), 8)
-        self.assertEqual(e.review_batches, 4)
+        for strategy in ("meeting-v3", "meeting-v4"):
+            # Each source is separated by a genuine gap; no arbitrary character cuts.
+            segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
+                         "text": f"第{i}项资料已具备。", "speaker": "B"} for i in range(8)]
+            e = self.reader(segments, dialogueStrategy=strategy)
+            def constrained(prompt, payload, validator, phase):
+                ids = [int(i) for i in re.findall(r"\[u(\d+)\]", payload.get("sources", ""))]
+                if phase in ("meeting_draft", "meeting_evidence") and len(ids) > 2:
+                    raise InputContextLimit("synthetic context limit")
+                if phase == "meeting_review" and len(payload["owned_checks"]) > 2:
+                    raise InputContextLimit("synthetic review limit")
+                units = [u for u in e.units if u["id"] in ids]
+                if phase == "meeting_merge":
+                    docs = payload["partial_documents"]
+                    self.assertTrue(all("quote" not in proof for d in docs for c in d["chapters"]
+                                        for claim in c["claims"] for proof in claim["evidence"]))
+                    value = {"overview": docs[0]["overview"], "chapters": [c for d in docs for c in d["chapters"]],
+                             "action_items": [], "uncertainties": []}
+                elif phase == "meeting_draft":
+                    if strategy == "meeting-v4":
+                        self.assertEqual([v["u"][0] for v in payload["information_notes"]], ids)
+                    value = document(units)
+                    value["chapters"][0]["claims"] = [item(u, text=u["text"]) for u in units]
+                elif phase == "meeting_evidence":
+                    value = {"items": [item(u, text=u["text"]) for u in units],
+                             "coverage": [{"unit": i, "disposition": "substantive"} for i in payload["owned_units"]]}
+                elif phase == "meeting_review":
+                    value = empty_review(payload["owned_checks"], payload["owned_targets"])
+                else:
+                    raise AssertionError(phase)
+                validator(value)
+                return value
+            with patch.object(e, "call", side_effect=constrained):
+                if strategy == "meeting-v4":
+                    e.inventory(e.units); e.identify(e.draft(e.units))
+                else:
+                    e.identify(e.draft(e.units)); e.inventory(e.units)
+                e.review_range(e.units)
+            self.assertEqual(e.route, "hierarchical")
+            self.assertEqual([c["u"][0] for ch in e.document["chapters"] for c in ch["claims"]], list(range(8)))
+            self.assertEqual([u for c in e.source_coverage for u in c["ownedUnits"]], list(range(8)))
+            self.assertEqual(e.reviewed, set(range(8)))
+            self.assertEqual(len(e.assessments), 8)
+            self.assertEqual(e.review_batches, 4)
 
     def test_compact_merge_rejects_source_evidence_not_present_in_parent_records(self):
         # Repeated wording is not permission to cite another person's occurrence.

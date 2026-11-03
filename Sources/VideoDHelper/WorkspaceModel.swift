@@ -11,6 +11,7 @@ final class WorkspaceModel: ObservableObject {
     @Published var recordingDuration: Double = 0
     @Published var recordingAction = "transcribe"
     @Published var dialogueStrategy = DialogueStrategy.defaultForNewTasks.rawValue
+    @Published var recordingContext = ""
     @Published var diarizationMode = "two"
     @Published var speakerNames: [String: String] = ["A": "说话人 A", "B": "说话人 B"]
     @Published var editsRevision = "original"
@@ -111,6 +112,7 @@ final class WorkspaceModel: ObservableObject {
     func resetReader() {
         recordingEditsValid = true
         dialogueStrategy = DialogueStrategy.defaultForNewTasks.rawValue
+        recordingContext = ""
         playback.stop(); recordingURL = nil; recordingDuration = 0; editsRevision = "original"
         speakerNames = ["A": "说话人 A", "B": "说话人 B"]
         metadata = nil; currentJob = nil; selectedTrackID = ""; link = ""

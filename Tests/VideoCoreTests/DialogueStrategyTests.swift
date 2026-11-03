@@ -233,7 +233,7 @@ struct DialogueStrategyTests {
     @Test func meetingStrategiesCopyInputsWithoutRunningModelsOrChangingOldTask() throws {
         let fixture = try DialogueComparisonFixture(); defer { fixture.cleanup() }
         let oldRequest = try Data(contentsOf: fixture.folder.appendingPathComponent("request.json"))
-        for strategy in [DialogueStrategy.meetingV3, .meetingBaseline] {
+        for strategy in [DialogueStrategy.meetingV3, .meetingBaseline, .meetingV4] {
             let comparison = try RecordingComparison.create(taskID: fixture.job.id, strategy: strategy, root: fixture.root)
             #expect(comparison.state == "transcribed")
             let target = fixture.directory(comparison.id)
@@ -280,6 +280,26 @@ struct DialogueStrategyTests {
         let invalid = String(decoding: bundle, as: UTF8.self).replacingOccurrences(of: "\"strategy\":\"meeting-v3\"", with: "\"strategy\":\"meeting-baseline\"")
         try Data(invalid.utf8).write(to: fixture.folder.appendingPathComponent("dialogue-results.json"))
         #expect(throws: (any Error).self) { try RecordingResults.load(from: fixture.folder) }
+    }
+
+    @Test func backgroundPersistsCopiesAndCannotAlterArchivedOrUnsupportedTasks() throws {
+        let fixture = try DialogueComparisonFixture(); defer { fixture.cleanup() }
+        let job = try RecordingComparison.create(taskID: fixture.job.id, strategy: .meetingV4, root: fixture.root)
+        let folder = fixture.directory(job.id)
+        let original = try Data(contentsOf: folder.appendingPathComponent("transcript.json"))
+        let note = Data("existing report".utf8)
+        try note.write(to: folder.appendingPathComponent("notes.json"))
+        #expect(try RecordingContext.save("  我负责实现，关注前提。\n", taskID: job.id, root: fixture.root) == "我负责实现，关注前提。")
+        #expect(try Data(contentsOf: folder.appendingPathComponent("transcript.json")) == original)
+        #expect(try Data(contentsOf: folder.appendingPathComponent("notes.json")) == note)
+        let copy = try RecordingComparison.create(taskID: job.id, strategy: .meetingV3, root: fixture.root)
+        #expect(try AppStorage.read(ProcessingRequest.self, from: fixture.directory(copy.id).appendingPathComponent("request.json")).recordingContext == "我负责实现，关注前提。")
+        let legacy = try RecordingComparison.create(taskID: job.id, strategy: .legacy, root: fixture.root)
+        #expect(try AppStorage.read(ProcessingRequest.self, from: fixture.directory(legacy.id).appendingPathComponent("request.json")).recordingContext == nil)
+        #expect(throws: (any Error).self) { try RecordingContext.save("不能静默忽略", taskID: legacy.id, root: fixture.root) }
+        #expect(throws: (any Error).self) { try RecordingContext.save(String(repeating: "长", count: 4001), taskID: job.id, root: fixture.root) }
+        _ = try TaskLifecycle.setArchived(true, taskID: job.id, root: fixture.root, workspace: .recording)
+        #expect(throws: (any Error).self) { try RecordingContext.save("归档后不编辑", taskID: job.id, root: fixture.root) }
     }
 
     @Test func meetingStagesKeepUsageUnknownUntilProviderReportsIt() {

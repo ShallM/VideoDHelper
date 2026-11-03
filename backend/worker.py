@@ -49,11 +49,15 @@ def validate_request(request):
     if kind not in ("bilibili", "recording"):
         raise UserError("任务来源类型无效。")
     if kind == "recording":
-        if (request.get("dialogueStrategy") or "legacy") not in ("legacy", "context-v2", "meeting-v3", "meeting-baseline"):
+        from meeting_understanding import normalize_context
+        context = normalize_context(request.get("recordingContext"))
+        if context and request.get("dialogueStrategy") not in ("meeting-v3", "meeting-baseline", "meeting-v4"):
+            raise UserError("该历史流程不支持录音背景，请新建会议纪要或任务理解对照。")
+        if (request.get("dialogueStrategy") or "legacy") not in ("legacy", "context-v2", "meeting-v3", "meeting-baseline", "meeting-v4"):
             raise UserError("录音理解方案无法识别，请更新应用后重试。")
         if request.get("recordingAction", "transcribe") not in ("transcribe", "summarize", "format") or request.get("diarizationMode", "off") not in ("two", "off"):
             raise UserError("录音处理选项无效。")
-        if request.get("recordingAction") == "format" and request.get("dialogueStrategy") not in ("meeting-v3", "meeting-baseline"):
+        if request.get("recordingAction") == "format" and request.get("dialogueStrategy") not in ("meeting-v3", "meeting-baseline", "meeting-v4"):
             raise UserError("独立标点优化仅适用于会议纪要流程。")
         if not isinstance(request.get("title"), str) or not request["title"].strip():
             raise UserError("录音标题无效。")

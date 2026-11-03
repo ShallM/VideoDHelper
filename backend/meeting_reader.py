@@ -15,10 +15,11 @@ from meeting_contract import (VERSION as CONTRACT_VERSION, FIELDS, ISSUE_KINDS, 
     validate_item, validate_evidence_item, punctuation_rows, render_item, string, evidence_anchors, OPTIONAL_DEFAULTS)
 from summary import ChatClient, InputContextLimit, ResponseOutputLimit, OutputLimit
 from summary_v2 import estimated_tokens
+from meeting_understanding import normalize_context, CONTEXT_RULE
 
 VERSION = "meeting-reader-v3.16"
 PROMPT_VERSION = "meeting-prompts-v1.9"
-STRATEGIES = {"meeting-v3", "meeting-baseline"}
+STRATEGIES = {"meeting-v3", "meeting-baseline", "meeting-v4"}
 PART_BUDGET = 240
 VALIDATION_FEEDBACK_CHARS = 1600
 
@@ -96,16 +97,28 @@ class MeetingReader(Reader):
         self.strategy = config.get("dialogueStrategy", "meeting-v3")
         if self.strategy not in STRATEGIES:
             raise UserError("未知会议纪要流程")
-        self.identity = digest({"base": self.identity, "strategy": self.strategy, "version": VERSION,
+        self.recording_context = normalize_context(config.get("recordingContext"))
+        self.evidence_first = self.strategy == "meeting-v4"
+        self.version, self.prompt_version = VERSION, PROMPT_VERSION
+        self.draft_prompt, self.evidence_prompt = DRAFT_PROMPT, EVIDENCE_PROMPT
+        self.review_prompt, self.reread_prompt = REVIEW_PROMPT, REREAD_PROMPT
+        if self.evidence_first:
+            from meeting_understanding import VERSION as V4_VERSION, PROMPT_VERSION as V4_PROMPTS, MAP_PROMPT, WRITE_PROMPT, VERIFY_PROMPT, READ_PROMPT
+            self.version, self.prompt_version = V4_VERSION, V4_PROMPTS
+            self.draft_prompt, self.evidence_prompt = WRITE_PROMPT, MAP_PROMPT
+            self.review_prompt, self.reread_prompt = VERIFY_PROMPT, READ_PROMPT
+        self.identity = digest({"base": self.identity, "strategy": self.strategy, "version": self.version,
             "purpose": purpose, "formattingGeneration": config.get("formattingGeneration"),
             "outputBudgets": [self.initial_output, self.max_output],
-            "contract": CONTRACT_VERSION, "promptVersion": PROMPT_VERSION, "partBudget": PART_BUDGET,
+            "contract": CONTRACT_VERSION, "promptVersion": self.prompt_version, "partBudget": PART_BUDGET,
             "validationFeedbackChars": VALIDATION_FEEDBACK_CHARS,
             "maxRereads": self.max_rereads,
-            "prompts": [DRAFT_PROMPT, EVIDENCE_PROMPT, REVIEW_PROMPT, REREAD_PROMPT, PUNCTUATE_PROMPT]})
-        self.config["summaryVersion"] = VERSION
+            "prompts": [self.draft_prompt, self.evidence_prompt, self.review_prompt, self.reread_prompt, PUNCTUATE_PROMPT]})
+        if self.recording_context:
+            self.identity = digest({"base": self.identity, "recordingContext": self.recording_context, "contextRule": CONTEXT_RULE})
+        self.config["summaryVersion"] = self.version
         self.config["validationFeedbackChars"] = VALIDATION_FEEDBACK_CHARS
-        self.client = MeetingChatClient(self.config, self.folder / "checkpoints" / "meeting-v3" / self.identity, emit,
+        self.client = MeetingChatClient(self.config, self.folder / "checkpoints" / ("meeting-v4" if self.evidence_first else "meeting-v3") / self.identity, emit,
                                        input_budget=self.input_budget, context_limit=self.context_limit)
         self.checks, self.assessments, self.retrieval_cache = {}, {}, {}
         self.retrieval_hits = self.duplicate_issues = self.no_progress = 0
@@ -127,6 +140,9 @@ class MeetingReader(Reader):
         return super().request_size(prompt, payload) - 256 + estimated_tokens("字" * VALIDATION_FEEDBACK_CHARS) + 128
 
     def call(self, prompt, payload, validator, phase):
+        if self.recording_context and phase != "meeting_punctuation":
+            prompt += CONTEXT_RULE
+            payload = {**payload, "task_context": {"origin": "user", "text": self.recording_context}}
         def checked(value):
             try:
                 return validator(value)
@@ -151,8 +167,11 @@ class MeetingReader(Reader):
 
     def draft(self, units, depth=0):
         payload = {"title": self.title, "sources": source_text(units)}
+        if self.evidence_first:
+            ids = {u["id"] for u in units}
+            payload["information_notes"] = compact_evidence([v for v in self.checks.values() if set(v["u"]).issubset(ids)])
         try:
-            return self.call(DRAFT_PROMPT, payload, lambda v: validate_document(v, units), "meeting_draft")
+            return self.call(self.draft_prompt, payload, lambda v: validate_document(v, units), "meeting_draft")
         except InputContextLimit:
             if len(units) < 2 or depth >= 12:
                 raise UserError("完整阅读单元超过输入容量，已保留阶段；未截断原稿") from None
@@ -170,7 +189,7 @@ class MeetingReader(Reader):
                     if any((p["unit"], p["start"], p["end"]) not in anchors for p in item["evidence"]):
                         raise ValueError("分层合并只能使用已读取候选的逐字证据，不能新增引文")
             try:
-                return self.call(DRAFT_PROMPT, merged, validate, "meeting_merge")
+                return self.call(self.draft_prompt, merged, validate, "meeting_merge")
             except InputContextLimit:
                 raise UserError("结构化候选纪要超过合并容量；已保留各范围结果，没有静默删减") from None
 
@@ -188,7 +207,7 @@ class MeetingReader(Reader):
                 if not ids.intersection(item["u"]):
                     raise ValueError("核对项必须涉及本批owned_units，不能只复述邻接背景")
         try:
-            value = self.call(EVIDENCE_PROMPT, payload, validate, "meeting_evidence")
+            value = self.call(self.evidence_prompt, payload, validate, "meeting_evidence")
         except InputContextLimit:
             if len(units) < 2 or depth >= 12:
                 raise UserError("关键证据提取超过输入容量；已保存成功范围") from None
@@ -425,7 +444,7 @@ class MeetingReader(Reader):
                        (comparison_units.intersection(v["value"]["u"]) and set(v["value"]["u"]).issubset(visible))}
             payload.update(sources=source_text(units), targets=list(targets.values()))
         try:
-            value = self.call(REVIEW_PROMPT, compact_evidence(payload),
+            value = self.call(self.review_prompt, compact_evidence(payload),
                 lambda v: self.validate_repair(v, units, targets, target_ids, checks, owned_units=ids), "meeting_review")
         except InputContextLimit:
             if len(owned) < 2 or depth >= 12:
@@ -475,7 +494,7 @@ class MeetingReader(Reader):
                 payload = {"issue": issue, "sources": source, "targets": list(targets.values())}
                 self.emit("reread", f"核对具体疑点 · 第 {round_index + 1} 轮，已处理 {len(self.reread_keys)} 项…")
                 try:
-                    value = self.call(REREAD_PROMPT, compact_evidence(payload),
+                    value = self.call(self.reread_prompt, compact_evidence(payload),
                         lambda v: self.validate_repair(v, units, targets, set(targets), {}, reread=True), "meeting_reread")
                 except InputContextLimit:
                     issue["diagnostic"] = "evidence_exceeds_budget"
@@ -530,7 +549,8 @@ class MeetingReader(Reader):
         notes = {"overview": self.document["overview"]["text"], "overviewSourceIDs": self.cited(self.document["overview"], statement=False)["source_ids"],
                  "chapters": chapters, "key_points": [], "action_items": [self.cited(i) for i in self.document["action_items"]], "uncertainties": questions,
                  "model": self.config["model"], "tokensThisRun": self.client.total_tokens, "summaryStrategy": self.strategy,
-                 "summaryRoute": self.route, "summaryVersion": VERSION, "summaryPromptVersion": PROMPT_VERSION,
+                 "summaryRoute": self.route, "summaryVersion": self.version, "summaryPromptVersion": self.prompt_version,
+                 "recordingContext": self.recording_context,
                  "reviewedParagraphs": len(self.reviewed), "paragraphCount": len(self.units), "rereadCount": self.reread_count,
                  "sourceKind": "recording", "sourceRevision": self.source_revision, "recordingRevision": self.config.get("recordingRevision", "original"),
                  "evidenceItemCount": len(self.checks), "assessmentCount": len(self.assessments)}
@@ -552,18 +572,24 @@ class MeetingReader(Reader):
         finally:
             self.stage_times[name] = round(time.monotonic() - started, 3)
 
+    def prepare_inventory(self):
+        self.emit("meeting_evidence", "围绕关注点阅读全文，梳理事项、状态与依赖…" if self.evidence_first else "独立阅读原文，整理关键事实、状态与条件证据…")
+        self.stage("evidence", lambda: self.inventory(self.units))
+        write_json(self.folder / "meeting-evidence.json", {"identity": self.identity, "checks": list(self.checks.values()), "coverage": self.source_coverage})
+
     def run(self):
         complete = False
         try:
             write_json(self.folder / "meeting-context.json", {"identity": self.identity, "units": self.units})
-            self.emit("meeting_draft", "全文阅读，生成详细主题纪要与明确行动…")
+            if self.evidence_first:
+                self.prepare_inventory()
+            self.emit("meeting_draft", "结合全文与信息底稿，组织主题、条件和下一步依据…" if self.evidence_first else "全文阅读，生成详细主题纪要与明确行动…")
             self.identify(self.stage("draft", lambda: self.draft(self.units)))
             write_json(self.folder / "meeting-draft.json", {"identity": self.identity, "document": self.document})
-            if self.strategy == "meeting-v3":
-                self.emit("meeting_evidence", "独立阅读原文，整理关键事实、状态与条件证据…")
-                self.stage("evidence", lambda: self.inventory(self.units))
-                write_json(self.folder / "meeting-evidence.json", {"identity": self.identity, "checks": list(self.checks.values()), "coverage": self.source_coverage})
-                self.emit("meeting_review", "对照原文与独立证据，检查遗漏、状态和归属…")
+            if self.strategy != "meeting-baseline":
+                if not self.evidence_first:
+                    self.prepare_inventory()
+                self.emit("meeting_review", "对照全文核验报告：检查遗漏、关系、状态与依据…" if self.evidence_first else "对照原文与独立证据，检查遗漏、状态和归属…")
                 self.stage("review", lambda: self.review_range(self.units))
                 self.stage("reread", self.reread)
             # A usable reading copy is deterministic. Optional punctuation is a
@@ -589,7 +615,8 @@ class MeetingReader(Reader):
                        "reviewResponsibility": self.review_responsibility,
                        "issueContext": {k: sorted(v) for k, v in self.issue_context.items()},
                        "readUnits": list(self.retrieval_cache), "rereadKeys": sorted(self.reread_keys)})
-            write_json(self.folder / "summary-run.json", {"version": VERSION, "strategy": self.strategy, "promptVersion": PROMPT_VERSION,
+            write_json(self.folder / "summary-run.json", {"version": self.version, "strategy": self.strategy, "promptVersion": self.prompt_version,
+                       "recordingContext": self.recording_context,
                        "identity": self.identity, "completed": complete, "published": self.publication, "route": self.route,
                        "elapsedSeconds": round(time.monotonic() - self.started, 3), "stageSeconds": self.stage_times,
                        "requests": self.client.request_count, "checkpointHits": self.client.cache_hits, "limitCheckpointHits": self.client.limit_hits,
@@ -620,7 +647,8 @@ def format_dialogue(segments, title, config, folder, emit):
             or bundle["strategy"] != config.get("dialogueStrategy")
             or notes.get("summaryStrategy") != bundle["strategy"]
             or notes.get("sourceRevision") != config.get("sourceRevision")
-            or notes.get("recordingRevision", "original") != config.get("recordingRevision", "original")):
+            or notes.get("recordingRevision", "original") != config.get("recordingRevision", "original")
+            or normalize_context(notes.get("recordingContext")) != normalize_context(config.get("recordingContext"))):
         raise UserError("原稿、校订或流程与已有纪要不一致，请先重新生成纪要；现有成果已保留。")
     engine = MeetingReader(segments, title, {**config, "formattingGeneration": bundle["generationID"]},
                            folder, emit, purpose="formatting")

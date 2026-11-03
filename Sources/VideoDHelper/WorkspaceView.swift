@@ -25,6 +25,7 @@ struct WorkspacePage: View {
     @Binding var workspace: WorkspaceKind
     let otherIsBusy: Bool
     @State private var editingSegment: TranscriptSegment?
+    @State private var showsRecordingContext = false
     @State private var optionsExpanded = true
     @State private var showsProjectEditor = false
     @State private var editingProject: TaskProject?
@@ -63,6 +64,7 @@ struct WorkspacePage: View {
         } message: { Text(model.error ?? "") }
         .sheet(isPresented: $model.showsLogin) { BilibiliLoginView(onSaved: model.sessionSaved) }
         .sheet(isPresented: $showsProjectEditor) { projectEditor }
+        .sheet(isPresented: $showsRecordingContext) { RecordingContextEditor(model: model) }
         .sheet(item: $editingSegment) { segment in RecordingSegmentEditor(model: model, segment: segment) }
         .confirmationDialog("移除项目", isPresented: Binding(get: { removingProject != nil }, set: { if !$0 { removingProject = nil } })) {
             Button("移除项目，保留所有任务", role: .destructive) {
@@ -449,9 +451,15 @@ struct WorkspacePage: View {
                 HStack(spacing: 12) {
                     Label(model.dialogueStrategyLabel, systemImage: "text.book.closed")
                         .font(.caption).foregroundStyle(.secondary)
+                    if model.currentJob != nil && model.supportsRecordingContext {
+                        Button { showsRecordingContext = true } label: {
+                            Label(model.recordingContext.isEmpty ? "补充背景与关注点" : "背景与关注点", systemImage: "text.bubble")
+                        }.disabled(model.isBusy || otherIsBusy || model.currentJobIsArchived)
+                    }
                     if model.currentJob != nil && !model.segments.isEmpty {
                         Menu {
-                            Button("会议纪要 · 预览") { model.compareRecording(strategy: .meetingV3) }
+                            Button("任务理解 · 预览") { model.compareRecording(strategy: .meetingV4) }
+                            Button("会议纪要 · 上一版") { model.compareRecording(strategy: .meetingV3) }
                             Menu("更多对照") {
                                 Button("全文纪要 · 对照基线") { model.compareRecording(strategy: .meetingBaseline) }
                                 Button("上一版全文对话理解") { model.compareRecording(strategy: .contextV2) }
@@ -505,7 +513,7 @@ struct WorkspacePage: View {
                     Spacer()
                 }.padding(.horizontal, 24).padding(.bottom, 12)
                 if model.summaryStale {
-                    Label("原稿已校订，当前整理稿与总结需重新生成。", systemImage: "exclamationmark.circle")
+                    Label("原稿或背景已变化，当前整理稿与总结需重新生成。", systemImage: "exclamationmark.circle")
                         .font(.caption).foregroundStyle(.orange).padding(.horizontal, 24).padding(.bottom, 12)
                 }
             }

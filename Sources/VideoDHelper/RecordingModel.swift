@@ -5,7 +5,19 @@ import VideoCore
 
 extension WorkspaceModel {
     var isRecording: Bool { workspace == .recording }
-    var summaryStale: Bool { isRecording && notes != nil && (notes?.recordingRevision ?? "original") != editsRevision }
+    var summaryStale: Bool {
+        isRecording && notes != nil && ((notes?.recordingRevision ?? "original") != editsRevision ||
+            (notes?.recordingContext ?? "") != recordingContext)
+    }
+    var supportsRecordingContext: Bool { DialogueStrategy(rawValue: dialogueStrategy)?.supportsContext == true }
+    func saveRecordingContext(_ text: String) -> Bool {
+        guard let job = currentJob, !isBusy, !currentJobIsArchived else { return false }
+        do {
+            recordingContext = try RecordingContext.save(text, taskID: job.id)
+            status = "背景已保存，下次整理时生效。已有成果保留，不会自动调用模型。"
+            return true
+        } catch { self.error = error.localizedDescription; return false }
+    }
     var canSummarizeRecording: Bool { isRecording && !isBusy && !segments.isEmpty && currentJob != nil && !currentJobIsArchived && recordingEditsValid }
     var canFormatRecording: Bool { canSummarizeRecording && notes?.isMeeting == true && !summaryStale && dialogueFormatting?.isComplete != true }
     var canTranscribeRecording: Bool { isRecording && !isBusy && recordingURL != nil && !currentJobIsArchived && editsRevision == "original" && recordingAction == "transcribe" && currentJob?.state != "transcribed" && currentJob?.state != "completed" }
@@ -68,6 +80,7 @@ extension WorkspaceModel {
             committed = true
             self.currentJob = job; self.recordingAction = "transcribe"
             self.dialogueStrategy = request.effectiveDialogueStrategy
+            self.recordingContext = request.recordingContext ?? ""
             self.whisperModel = selectedModel
             self.metadata = nil; self.link = ""; self.segments = []; self.condensed = []; self.notes = nil; self.dialogueFormatting = nil
             self.title = job.title; self.source = job.source; self.recordingURL = destination; self.recordingDuration = duration
@@ -128,11 +141,11 @@ extension WorkspaceModel {
             self.reloadJob(job)
             self.history = AppStorage.history().filter { $0.workspace == self.workspace }
             if let projectID { self.moveJob(job, to: projectID) }
-            self.status = "已创建\(DialogueStrategy.label(for: strategy.rawValue))对照，原任务与成果保留。点击“整理与总结”开始。"
+            self.status = "已创建\(DialogueStrategy.label(for: strategy.rawValue))对照，原任务与成果保留。点击“整理与总结”开始。" + (strategy.supportsContext ? "" : "该历史流程不使用补充背景。")
         }
     }
     func loadRecording(_ job: ProcessingJob) {
-        recordingURL = nil; recordingDuration = 0; recordingAction = "transcribe"
+        recordingURL = nil; recordingDuration = 0; recordingAction = "transcribe"; recordingContext = ""
         dialogueStrategy = job.dialogueStrategy ?? DialogueStrategy.legacy.rawValue
         playback.stop()
         speakerNames = (try? AppStorage.read([String: String].self, from: job.directory.appendingPathComponent("speakers.json"))) ?? ["A": "说话人 A", "B": "说话人 B"]
@@ -155,6 +168,7 @@ extension WorkspaceModel {
         if let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")) {
             recordingAction = request.recordingAction ?? "transcribe"
             dialogueStrategy = request.effectiveDialogueStrategy
+            recordingContext = request.recordingContext ?? ""
             whisperModel = request.effectiveASRModelID
             diarizationMode = request.diarizationMode ?? "off"
             struct SourceInfo: Decodable { let duration: Double }
@@ -201,6 +215,9 @@ extension WorkspaceModel {
     func recordingMarkdown(notesExport: Bool) -> String {
         var lines = ["# \(title) · \(notesExport ? "对话总结" : "整理对话")", ""]
         if notesExport, let notes {
+            if let context = notes.recordingContext, !context.isEmpty {
+                lines += ["用户补充背景（不是录音原话）：", context, ""]
+            }
             lines += [displayText(notes.overview), ""]
             if let ids = notes.overviewSourceIDs, !ids.isEmpty { lines += ["[" + sourceLabel(ids) + "]", ""] }
             for chapter in notes.chapters {

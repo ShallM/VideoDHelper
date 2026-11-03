@@ -1,6 +1,38 @@
 import SwiftUI
 import VideoCore
 
+struct RecordingContextEditor: View {
+    @ObservedObject var model: WorkspaceModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("背景与关注点").font(.title2.bold())
+            Text("可选：这段录音讨论什么？你参与什么工作，最希望弄清哪些问题？")
+                .foregroundStyle(.secondary)
+            TextEditor(text: $text).font(.body).padding(8)
+                .frame(minHeight: 180).background(.quaternary.opacity(0.35))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .accessibilityLabel("录音背景与关注点")
+            HStack {
+                Text("作为你补充的背景发送给模型，与录音原文分开。")
+                Spacer()
+                Text("\(text.unicodeScalars.count) / 4000")
+            }.font(.caption).foregroundStyle(.secondary)
+            Text("保存后，下次整理才会使用；已有成果保留。新建对照任务会复制这份背景。")
+                .font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("保存背景") { if model.saveRecordingContext(text) { dismiss() } }
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .disabled(text.unicodeScalars.count > 4000 || model.isBusy || model.currentJobIsArchived)
+            }
+        }.padding(24).frame(width: 560).onAppear { text = model.recordingContext }
+    }
+}
+
 struct RecordingCondensedText: View {
     @ObservedObject var model: WorkspaceModel
     let item: CitedText
