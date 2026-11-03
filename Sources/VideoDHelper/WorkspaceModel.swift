@@ -11,6 +11,7 @@ final class WorkspaceModel: ObservableObject {
     @Published var recordingDuration: Double = 0
     @Published var recordingAction = "transcribe"
     @Published var dialogueStrategy = DialogueStrategy.defaultForNewTasks.rawValue
+    @Published var recordingContext = ""
     @Published var diarizationMode = "two"
     @Published var speakerNames: [String: String] = ["A": "说话人 A", "B": "说话人 B"]
     @Published var editsRevision = "original"
@@ -19,7 +20,9 @@ final class WorkspaceModel: ObservableObject {
     @Published var link = ""
     @Published var metadata: VideoMetadata?
     @Published var selectedTrackID = ""
-    @Published var segments: [TranscriptSegment] = []
+    @Published var segments: [TranscriptSegment] = [] { didSet { timeIndex = TranscriptTimeIndex(segments) } }
+    private var timeIndex = TranscriptTimeIndex()
+    @Published private(set) var activity: ProcessingActivity?
     @Published var condensed: [CitedText] = []
     @Published var dialogueFormatting: DialogueFormatting?
     @Published var notes: StudyNotes?
@@ -109,12 +112,13 @@ final class WorkspaceModel: ObservableObject {
     func resetReader() {
         recordingEditsValid = true
         dialogueStrategy = DialogueStrategy.defaultForNewTasks.rawValue
+        recordingContext = ""
         playback.stop(); recordingURL = nil; recordingDuration = 0; editsRevision = "original"
         speakerNames = ["A": "说话人 A", "B": "说话人 B"]
         metadata = nil; currentJob = nil; selectedTrackID = ""; link = ""
         segments = []; condensed = []; notes = nil; dialogueFormatting = nil; source = ""; title = workspace == .bilibili ? "把视频变成学习笔记" : "整理一段对话"
         controlsExpanded = true
-        selectedTab = 0; stage = ""; progress = nil; error = nil
+        selectedTab = 0; stage = ""; progress = nil; error = nil; activity = nil
         applyDefaults()
         status = newTaskProjectID == nil ? (workspace == .bilibili ? "粘贴链接，开始一个新任务。" : "选择手机录音，在本机提取对话。") : "新任务将保存到「\(collectionTitle)」。"
     }
@@ -216,27 +220,7 @@ final class WorkspaceModel: ObservableObject {
         }
     }
     var stageLabel: String {
-        switch stage {
-        case "prepare": return "准备任务"
-        case "download": return "获取媒体"
-        case "model": return "准备转录模型"
-        case "transcribe": return "本地转录"
-        case "align": return "对齐文字时间"
-        case "diarize": return "区分说话人"
-        case "transcribed": return "原稿已就绪"
-        case "transcript": return "保存原稿"
-        case "summary": return isRecording ? "理解对话与主题" : "整理台词与章节"
-        case "condense": return "独立整理原话"
-        case "review": return "对照原文复核"
-        case "plan": return "理解全文结构"
-        case "chapter": return "整理主题笔记"
-        case "verify": return "检查遗漏与依据"
-        case "reread": return "回查原文"
-        case "overview": return isRecording ? "汇总对话总结" : "汇总学习笔记"
-        case "cleanup": return "清理媒体"
-        case "completed": return "处理完成"
-        default: return ""
-        }
+        ProcessingActivity.title(for: activity?.current.stage ?? stage, recording: isRecording)
     }
     func inspectLink() {
         guard !isBusy else { return }
@@ -339,9 +323,12 @@ final class WorkspaceModel: ObservableObject {
         do {
             try await ProcessingWorker.run(job: job) { [weak self] event in
                 Task { @MainActor in
-                    guard let self, self.isBusy, self.runID == thisRun else { return }
-                    self.status = event.message; self.stage = event.stage; self.progress = event.progress
-                    if self.segments.isEmpty, ["transcript", "summary", "condense", "review", "overview", "plan", "chapter", "verify", "reread"].contains(event.stage) {
+                    guard let self, self.isBusy, self.runID == thisRun, self.activity?.outcome == .running else { return }
+                    self.activity?.receive(stage: event.stage, message: event.message, progress: event.progress)
+                    if self.status != event.message { self.status = event.message }
+                    if self.stage != event.stage { self.stage = event.stage }
+                    if self.progress != self.activity?.progress { self.progress = self.activity?.progress }
+                    if self.segments.isEmpty, ["transcript", "summary", "condense", "review", "overview", "plan", "chapter", "verify", "reread", "meeting_draft", "meeting_evidence", "meeting_review"].contains(event.stage) {
                         self.segments = (try? AppStorage.read([TranscriptSegment].self, from: job.directory.appendingPathComponent("transcript.json"))) ?? []
                     }
                 }
@@ -354,7 +341,7 @@ final class WorkspaceModel: ObservableObject {
     }
     func openJob(_ job: ProcessingJob) {
         guard !isBusy, job.workspace == workspace else { return }
-        playback.stop()
+        playback.stop(); activity = nil
         metadata = nil; selectedTrackID = ""; link = job.url
         segments = []; notes = nil; condensed = []
         reloadJob(job)
@@ -409,6 +396,7 @@ final class WorkspaceModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
     private func show(segments: [TranscriptSegment], title: String, source: String) {
+        activity = nil
         self.segments = segments; self.title = title; self.source = source
         self.notes = nil; self.condensed = []; self.currentJob = nil
         self.status = "已读取 \(segments.count) 段字幕。"; self.error = nil; self.selectedTab = 0
@@ -451,20 +439,19 @@ final class WorkspaceModel: ObservableObject {
     }
     func openSource(_ ids: [Int]) {
         if workspace == .recording {
-            if let id = ids.first, let segment = segments.first(where: { $0.id == id }) { playback.seek(to: segment.start); playback.play() }
+            if let id = ids.first, let time = timeIndex.start(for: id) { playback.seek(to: time); playback.play() }
             return
         }
         let sourceURL = currentJob?.url ?? metadata?.canonicalURL.absoluteString ?? ""
-        guard let first = ids.first, let segment = segments.first(where: { $0.id == first }),
+        guard let first = ids.first, let time = timeIndex.start(for: first),
               var components = URLComponents(string: sourceURL), components.host != nil else { return }
         var query = components.queryItems ?? []; query.removeAll { $0.name == "t" }
-        query.append(URLQueryItem(name: "t", value: String(Int(segment.start))))
+        query.append(URLQueryItem(name: "t", value: String(Int(time))))
         components.queryItems = query
         if let url = components.url { NSWorkspace.shared.open(url) }
     }
     func sourceLabel(_ ids: [Int]) -> String {
-        let values = ids.compactMap { id in segments.first(where: { $0.id == id })?.start }
-        guard let first = values.min(), let last = values.max() else { return "回看来源" }
+        guard let (first, last) = timeIndex.range(for: ids) else { return "回看来源" }
         return TranscriptExport.timestamp(first) + (last > first ? " – \(TranscriptExport.timestamp(last))" : "")
     }
     func sourceRanges(_ ids: [Int]) -> [[Int]] {
@@ -487,7 +474,12 @@ final class WorkspaceModel: ObservableObject {
         hasSavedSession = FileManager.default.fileExists(atPath: BilibiliCookies.fileURL.path)
         if !isBusy && currentJob == nil && metadata == nil { applyDefaults() }
     }
-    func cancel() { status = "正在取消并保存已完成的阶段…"; activeTask?.cancel() }
+    func cancel() {
+        guard isBusy, activity?.outcome == .running else { return }
+        activity?.cancel()
+        status = "正在取消并保存已完成的阶段…"
+        activeTask?.cancel()
+    }
     func sessionSaved() {
         hasSavedSession = true; status = "已保存本机登录会话。"
         if !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { inspectLink() }
@@ -498,10 +490,15 @@ final class WorkspaceModel: ObservableObject {
         WorkspaceProcessing.owner = workspace
         playback.pause()
         isBusy = true; self.status = status; progress = nil; stage = ""; error = nil; runID = UUID()
+        activity = ProcessingActivity(message: status)
         activeTask = Task {
             defer { isBusy = false; activeTask = nil; progress = nil; WorkspaceProcessing.owner = nil }
-            do { try await operation() }
+            do {
+                try await operation()
+                activity?.finish(.succeeded)
+            }
             catch is CancellationError {
+                activity?.finish(.cancelled)
                 self.status = "已取消。已完成的数据保留，可继续处理。"
                 if var job = self.currentJob, job.state == "running" || job.state == "pending",
                    FileManager.default.fileExists(atPath: job.directory.appendingPathComponent("job.json").path) {
@@ -510,7 +507,11 @@ final class WorkspaceModel: ObservableObject {
                     self.currentJob = job; self.history = AppStorage.history().filter { $0.workspace == self.workspace }
                 }
             }
-            catch { self.error = error.localizedDescription; self.status = "处理未完成，已保留完成的数据。" }
+            catch {
+                activity?.finish(.failed)
+                self.error = error.localizedDescription
+                self.status = error.localizedDescription
+            }
         }
     }
 }

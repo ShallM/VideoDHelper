@@ -66,6 +66,7 @@ public enum RecordingComparison {
             }
             request.recordingAction = "summarize"
             request.dialogueStrategy = strategy.rawValue
+            if !strategy.supportsContext { request.recordingContext = nil }
             request.summaryStrategy = "structured"
             try Task.checkCancellation()
             try AppStorage.write(request, to: target.appendingPathComponent("request.json"))

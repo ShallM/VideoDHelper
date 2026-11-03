@@ -112,6 +112,15 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(again["chapters"], notes["chapters"])
         self.assertEqual(again["tokensThisRun"], 0)
 
+    def test_activity_stages_separate_evidence_review_and_publication(self):
+        engine = self.reader()
+        events = []
+        engine.emit = lambda stage, message, progress=None: events.append(stage)
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            engine.run()
+        self.assertEqual(events, ["meeting_draft", "meeting_evidence", "meeting_review", "save"])
+        self.assertTrue((self.folder / "dialogue-results.json").exists())
+
     def test_baseline_does_not_review_but_uses_same_draft_and_readable_dialogue(self):
         _, (notes, _) = self.run_reader(dialogueStrategy="meeting-baseline")
         self.assertEqual([p for p, _, _ in self.requests], ["meeting_draft"])
@@ -711,43 +720,50 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(e.document["chapters"][0]["claims"][1], unrelated)
 
     def test_input_limit_splits_complete_responsibility_ranges_and_preserves_end(self):
-        # Each source is separated by a genuine gap; no arbitrary character cuts.
-        segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
-                     "text": f"第{i}项资料已具备。", "speaker": "B"} for i in range(8)]
-        e = self.reader(segments)
-        def constrained(prompt, payload, validator, phase):
-            ids = [int(i) for i in re.findall(r"\[u(\d+)\]", payload.get("sources", ""))]
-            if phase in ("meeting_draft", "meeting_evidence") and len(ids) > 2:
-                raise InputContextLimit("synthetic context limit")
-            if phase == "meeting_review" and len(payload["owned_checks"]) > 2:
-                raise InputContextLimit("synthetic review limit")
-            units = [u for u in e.units if u["id"] in ids]
-            if phase == "meeting_merge":
-                docs = payload["partial_documents"]
-                self.assertTrue(all("quote" not in proof for d in docs for c in d["chapters"]
-                                    for claim in c["claims"] for proof in claim["evidence"]))
-                value = {"overview": docs[0]["overview"], "chapters": [c for d in docs for c in d["chapters"]],
-                         "action_items": [], "uncertainties": []}
-            elif phase == "meeting_draft":
-                value = document(units)
-                value["chapters"][0]["claims"] = [item(u, text=u["text"]) for u in units]
-            elif phase == "meeting_evidence":
-                value = {"items": [item(u, text=u["text"]) for u in units],
-                         "coverage": [{"unit": i, "disposition": "substantive"} for i in payload["owned_units"]]}
-            elif phase == "meeting_review":
-                value = empty_review(payload["owned_checks"], payload["owned_targets"])
-            else:
-                raise AssertionError(phase)
-            validator(value)
-            return value
-        with patch.object(e, "call", side_effect=constrained):
-            e.identify(e.draft(e.units)); e.inventory(e.units); e.review_range(e.units)
-        self.assertEqual(e.route, "hierarchical")
-        self.assertEqual([c["u"][0] for ch in e.document["chapters"] for c in ch["claims"]], list(range(8)))
-        self.assertEqual([u for c in e.source_coverage for u in c["ownedUnits"]], list(range(8)))
-        self.assertEqual(e.reviewed, set(range(8)))
-        self.assertEqual(len(e.assessments), 8)
-        self.assertEqual(e.review_batches, 4)
+        for strategy in ("meeting-v3", "meeting-v4"):
+            # Each source is separated by a genuine gap; no arbitrary character cuts.
+            segments = [{"id": i, "start": i * 10., "end": i * 10. + 2,
+                         "text": f"第{i}项资料已具备。", "speaker": "B"} for i in range(8)]
+            e = self.reader(segments, dialogueStrategy=strategy)
+            def constrained(prompt, payload, validator, phase):
+                ids = [int(i) for i in re.findall(r"\[u(\d+)\]", payload.get("sources", ""))]
+                if phase in ("meeting_draft", "meeting_evidence") and len(ids) > 2:
+                    raise InputContextLimit("synthetic context limit")
+                if phase == "meeting_review" and len(payload["owned_checks"]) > 2:
+                    raise InputContextLimit("synthetic review limit")
+                units = [u for u in e.units if u["id"] in ids]
+                if phase == "meeting_merge":
+                    docs = payload["partial_documents"]
+                    self.assertTrue(all("quote" not in proof for d in docs for c in d["chapters"]
+                                        for claim in c["claims"] for proof in claim["evidence"]))
+                    value = {"overview": docs[0]["overview"], "chapters": [c for d in docs for c in d["chapters"]],
+                             "action_items": [], "uncertainties": []}
+                elif phase == "meeting_draft":
+                    if strategy == "meeting-v4":
+                        self.assertEqual([v["u"][0] for v in payload["information_notes"]], ids)
+                    value = document(units)
+                    value["chapters"][0]["claims"] = [item(u, text=u["text"]) for u in units]
+                elif phase == "meeting_evidence":
+                    value = {"items": [item(u, text=u["text"]) for u in units],
+                             "coverage": [{"unit": i, "disposition": "substantive"} for i in payload["owned_units"]]}
+                elif phase == "meeting_review":
+                    value = empty_review(payload["owned_checks"], payload["owned_targets"])
+                else:
+                    raise AssertionError(phase)
+                validator(value)
+                return value
+            with patch.object(e, "call", side_effect=constrained):
+                if strategy == "meeting-v4":
+                    e.inventory(e.units); e.identify(e.draft(e.units))
+                else:
+                    e.identify(e.draft(e.units)); e.inventory(e.units)
+                e.review_range(e.units)
+            self.assertEqual(e.route, "hierarchical")
+            self.assertEqual([c["u"][0] for ch in e.document["chapters"] for c in ch["claims"]], list(range(8)))
+            self.assertEqual([u for c in e.source_coverage for u in c["ownedUnits"]], list(range(8)))
+            self.assertEqual(e.reviewed, set(range(8)))
+            self.assertEqual(len(e.assessments), 8)
+            self.assertEqual(e.review_batches, 4)
 
     def test_compact_merge_rejects_source_evidence_not_present_in_parent_records(self):
         # Repeated wording is not permission to cite another person's occurrence.
@@ -1015,6 +1031,24 @@ class MeetingTests(unittest.TestCase):
         self.assertNotEqual(e.identity, self.route_reader(dialogueMaxOutputTokens=131072).identity)
         for config in ({"dialogueMaxOutputTokens": 262145}, {"dialogueOutputTokens": 262144, "dialogueMaxOutputTokens": 131072}):
             with self.assertRaises(UserError): self.route_reader(**config)
+
+    def test_pro_uses_same_meeting_budgets_and_json_mode_without_changing_frozen_reader(self):
+        e = self.route_reader(model="deepseek-v4-pro", reasoningEffort="high")
+        self.assertEqual((e.initial_output, e.max_output), (131072, 262144))
+        self.assertTrue(e.config["jsonObjectMode"])
+        self.assertEqual(e.client.reasoning_effort, "high")
+        self.hook = lambda *args: self.envelope({"ok": True})
+        with patch.object(ChatClient, "_request", lambda client, body, phase: self.response(client, body, phase)):
+            e.call("预算测试", {}, lambda v: self.assertTrue(v["ok"]), "meeting_draft")
+        body = self.requests[0][2]
+        self.assertEqual(body["model"], "deepseek-v4-pro")
+        self.assertEqual(body["max_tokens"], 131072)
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        frozen = Reader(transcript(), "预算测试", {"baseURL": "https://api.icompify.com/v1", "model": "deepseek-v4-pro",
+                        "apiKey": "test-only", "reasoningEffort": "high"}, self.folder, lambda *a: None)
+        self.assertEqual((frozen.initial_output, frozen.max_output), (32768, 32768))
+        self.assertFalse(frozen.config["jsonObjectMode"])
+        self.assertFalse(self.route_reader(model="deepseek-v4-pro", jsonObjectMode=False).config["jsonObjectMode"])
 
     def test_new_output_budgets_are_sent_and_successful_replay_has_no_new_requests(self):
         self.hook = lambda client, body, phase, payload: (self.envelope({"ok": True}) if body["max_tokens"] == 262144 else
