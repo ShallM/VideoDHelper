@@ -291,6 +291,59 @@ class PipelineTests(unittest.TestCase):
         self.assertFalse((folder / 'media').exists())
         self.assertEqual(read_json(folder / 'job.json')['state'], 'completed')
 
+    def test_video_transcription_needs_no_cloud_and_summary_reuses_saved_original(self):
+        folder = self.make_job(False)
+        request = read_json(folder / 'request.json')
+        request.update(videoAction='transcribe', useWhisper=True, mediaMode='needed', asrModelID='large-v3')
+        write_json(folder / 'request.json', request)
+        with patch('worker.load_config', side_effect=AssertionError('No cloud configuration for ASR')), \
+             patch('worker.summarize', side_effect=AssertionError('No summary for ASR')), \
+             patch('worker.download', return_value=folder / 'media/source.mp4'), \
+             patch('worker.transcribe', return_value=segments(2)) as asr:
+            self.assertEqual(run(folder, self.root), 0)
+            asr.assert_called_once()
+        self.assertEqual(read_json(folder / 'job.json')['state'], 'transcribed')
+        self.assertEqual(read_json(folder / 'transcript.json'), segments(2))
+        self.assertTrue((folder / 'source.srt').is_file())
+        self.assertFalse((folder / 'study-notes.md').exists())
+        self.assertFalse((folder / 'media').exists())
+        request['videoAction'] = 'summarize'
+        write_json(folder / 'request.json', request)
+        notes = {'overview': 'ok', 'chapters': [], 'key_points': [], 'uncertainties': [], 'model': 'fake'}
+        with patch('worker.download', side_effect=AssertionError('Do not redownload')), \
+             patch('worker.transcribe', side_effect=AssertionError('Do not retranscribe')), \
+             patch('worker.summarize', return_value=(notes, [])) as summary:
+            self.assertEqual(run(folder, self.root), 0)
+            self.assertEqual(summary.call_args.args[0], segments(2))
+        self.assertEqual(read_json(folder / 'job.json')['state'], 'completed')
+
+    def test_platform_subtitle_only_saves_durably_without_cloud(self):
+        folder = self.make_job(True)
+        request = read_json(folder / 'request.json')
+        request.update(videoAction='transcribe', mediaMode='needed')
+        write_json(folder / 'request.json', request)
+        with patch('worker.load_config', side_effect=AssertionError('No cloud')), \
+             patch('worker.summarize', side_effect=AssertionError('No summary')), \
+             patch('worker.download', side_effect=AssertionError('No media needed')):
+            self.assertEqual(run(folder, self.root), 0)
+        self.assertEqual(read_json(folder / 'job.json')['state'], 'transcribed')
+        self.assertEqual(read_json(folder / 'transcript.json'), segments(2))
+        self.assertTrue((folder / 'media/source.mp4').exists())
+
+    def test_cancelled_video_transcription_resumes_without_starting_summary(self):
+        folder = self.make_job(True)
+        request = read_json(folder / 'request.json')
+        request.update(videoAction='transcribe', useWhisper=True)
+        write_json(folder / 'request.json', request)
+        with patch('worker.load_config', side_effect=AssertionError('No cloud')), \
+             patch('worker.summarize', side_effect=AssertionError('No summary')), \
+             patch('worker.download', return_value=folder / 'media/source.mp4'), \
+             patch('worker.transcribe', side_effect=[KeyboardInterrupt(), segments(2)]):
+            self.assertEqual(run(folder, self.root), 2)
+            self.assertEqual(read_json(folder / 'job.json')['state'], 'cancelled')
+            self.assertEqual(run(folder, self.root), 0)
+        self.assertEqual(read_json(folder / 'job.json')['state'], 'transcribed')
+
     def test_keep_media_option_retains_file_after_completion(self):
         folder = self.make_job(True)
         notes = {'overview': 'ok', 'chapters': [], 'key_points': [], 'uncertainties': [], 'model': 'fake'}

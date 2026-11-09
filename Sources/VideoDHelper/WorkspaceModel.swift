@@ -20,7 +20,9 @@ final class WorkspaceModel: ObservableObject {
     @Published var link = ""
     @Published var metadata: VideoMetadata?
     @Published var selectedTrackID = ""
-    @Published var segments: [TranscriptSegment] = [] { didSet { timeIndex = TranscriptTimeIndex(segments) } }
+    @Published var segments: [TranscriptSegment] = [] { didSet { timeIndex = TranscriptTimeIndex(segments); subtitleCopyFeedback = nil } }
+    @Published var subtitleCopyFeedback: String?
+    private var loadedTrackID: String?
     private var timeIndex = TranscriptTimeIndex()
     @Published private(set) var activity: ProcessingActivity?
     @Published var condensed: [CitedText] = []
@@ -199,7 +201,8 @@ final class WorkspaceModel: ObservableObject {
         }
     }
     var audioFormats: [MediaFormat] { (metadata?.formats ?? []).filter { $0.hasAudio && !$0.hasVideo }.reversed() }
-    var canStart: Bool { !isBusy && (metadata != nil || (!segments.isEmpty && currentJob == nil)) }
+    var canStart: Bool { !isBusy && !currentJobIsArchived && (metadata != nil || (!segments.isEmpty && (currentJob == nil || currentJob?.state == "transcribed"))) }
+    var canExtractVideoSubtitles: Bool { !isBusy && currentJob == nil && (metadata != nil || !segments.isEmpty) }
     var currentJobIsArchived: Bool { currentJob.map { library.isArchived($0.id) } ?? false }
     var canResume: Bool { !isBusy && currentJob != nil && currentJob?.state != "completed" && currentJob?.state != "transcribed" && !currentJobIsArchived }
     var canChooseASRModel: Bool {
@@ -208,7 +211,7 @@ final class WorkspaceModel: ObservableObject {
     }
     var asrModelName: String { ASRModelStore.shared.name(whisperModel) }
     var requiresInstalledASR: Bool {
-        if let job = currentJob, metadata == nil,
+        if let job = currentJob,
            let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")) {
             return ASRTaskSelection.needsModel(for: request, directory: job.directory)
         }
@@ -232,6 +235,7 @@ final class WorkspaceModel: ObservableObject {
             let info = try await BilibiliProbe.inspect(reference, cookieFile: BilibiliCookies.fileURL)
             try Task.checkCancellation()
             self.metadata = info
+            self.loadedTrackID = nil
             self.selectedTrackID = info.tracks.first?.id ?? ""
             self.videoFormatID = self.videoFormats.first(where: { $0.codecLabel == "H.264" && ($0.height ?? 0) <= 1080 })?.id ?? self.videoFormats.first?.id ?? ""
             self.audioFormatID = self.audioFormats.first?.id ?? ""
@@ -241,15 +245,52 @@ final class WorkspaceModel: ObservableObject {
             self.selectedTab = 0
         }
     }
-    func loadTrack() {
+    func loadTrack(copyAfterLoading: Bool = false) {
         guard let track = selectedTrack, let info = metadata, !isBusy else { return }
         start(status: "正在读取字幕…") {
             let segments = try await BilibiliProbe.load(track, referer: info.url)
             try Task.checkCancellation()
             self.show(segments: segments, title: info.title, source: track.label)
+            self.loadedTrackID = track.id
+            if copyAfterLoading { self.copyLoadedSubtitles() }
         }
     }
+    var canCopyOriginalSubtitles: Bool {
+        !segments.isEmpty || (!isBusy && transcriptionMode == "auto" && selectedTrack != nil)
+    }
+    func copyOriginalSubtitles() {
+        if !isBusy, currentJob == nil, transcriptionMode == "auto", let track = selectedTrack,
+           loadedTrackID != track.id || segments.isEmpty {
+            loadTrack(copyAfterLoading: true)
+        } else { copyLoadedSubtitles() }
+    }
+    private func copyLoadedSubtitles() {
+        guard !segments.isEmpty else { return }
+        let content = TranscriptExport.srt(segments)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if pasteboard.setString(content, forType: .string) {
+            subtitleCopyFeedback = "已复制 \(segments.count) 段"
+        } else { error = "无法写入剪贴板，请重试。" }
+    }
     func beginProcessing() {
+        if let job = currentJob, job.state == "transcribed", !isBusy, !currentJobIsArchived {
+            start(status: "使用已保存的原始字幕生成学习笔记…") {
+                var request = try AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json"))
+                request.videoAction = "summarize"
+                request.mediaMode = "needed"
+                try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
+                try await self.run(job)
+            }
+            return
+        }
+        beginVideoProcessing(transcriptOnly: false)
+    }
+    func extractVideoSubtitles() {
+        guard canExtractVideoSubtitles else { return }
+        beginVideoProcessing(transcriptOnly: true)
+    }
+    private func beginVideoProcessing(transcriptOnly: Bool) {
         guard canStart else { return }
         if collection == .archived { collection = .recent }
         if let info = metadata {
@@ -257,7 +298,7 @@ final class WorkspaceModel: ObservableObject {
                 error = "链接已修改，请先重新读取视频信息，避免处理上一个视频。"; return
             }
         }
-        start(status: "正在准备学习笔记任务…") {
+        start(status: transcriptOnly ? "正在准备原始字幕，不生成笔记…" : "正在准备学习笔记任务…") {
             try self.requireASRIfNeeded()
             let info = self.metadata
             let useWhisper = info != nil && (self.transcriptionMode == "whisper" || self.selectedTrack == nil)
@@ -274,6 +315,7 @@ final class WorkspaceModel: ObservableObject {
                 videoIncludesAudio: self.videoFormats.first(where: { $0.id == self.videoFormatID })?.hasAudio ?? false,
                 container: self.container, whisperModel: self.whisperModel, summaryStrategy: self.summaryStrategy)
             request.asrModelID = self.whisperModel
+            request.videoAction = transcriptOnly ? "transcribe" : "summarize"
             try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
             try AppStorage.write(job, to: job.directory.appendingPathComponent("job.json"))
             self.currentJob = job; self.source = source; self.notes = nil; self.condensed = []; self.historyQuery = ""
