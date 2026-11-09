@@ -366,11 +366,12 @@ struct WorkspacePage: View {
                     Picker("字幕语言", selection: $model.selectedTrackID) {
                         ForEach(info.tracks) { Text($0.label).tag($0.id) }
                     }.labelsHidden()
-                    Button("先查看原始字幕", action: model.loadTrack).buttonStyle(.link)
+                    Button("先查看原始字幕") { model.loadTrack() }.buttonStyle(.link)
                 } else {
                     speechModelPicker
                     Text("模型需在设置中主动下载，转录使用 MLX / Metal 加速。").font(.caption).foregroundStyle(.secondary)
                 }
+                copySubtitlesButton
             }.frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: 10) {
                 Label("媒体下载", systemImage: "arrow.down.circle").font(.subheadline.bold())
@@ -501,6 +502,9 @@ struct WorkspacePage: View {
 
     private var readingContent: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if !model.isRecording && (model.metadata == nil || !optionsExpanded || model.isBusy) {
+                copySubtitlesButton.padding(.horizontal, 20).padding(.top, 12)
+            }
             Picker("阅读视图", selection: $model.selectedTab) {
                 Text(model.isRecording ? "原始对话" : "原始台词").tag(0)
                 Text(model.isRecording ? "整理对话" : "精简台词").tag(1)
@@ -572,6 +576,19 @@ struct WorkspacePage: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 26).padding(.bottom, 24)
             }.id("\(model.currentJob?.id ?? model.title)-\(model.selectedTab)")
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var copySubtitlesButton: some View {
+        HStack(spacing: 8) {
+            Button(action: model.copyOriginalSubtitles) {
+                Label("复制原始字幕（带时间戳）", systemImage: "doc.on.doc")
+            }
+            .disabled(!model.canCopyOriginalSubtitles)
+            .help("复制完整 SRT 字幕，包含每段的开始、结束时间和原文。不会调用大语言模型。")
+            if let message = model.subtitleCopyFeedback {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var pendingText: some View {

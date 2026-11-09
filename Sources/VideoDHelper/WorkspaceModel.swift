@@ -20,7 +20,9 @@ final class WorkspaceModel: ObservableObject {
     @Published var link = ""
     @Published var metadata: VideoMetadata?
     @Published var selectedTrackID = ""
-    @Published var segments: [TranscriptSegment] = [] { didSet { timeIndex = TranscriptTimeIndex(segments) } }
+    @Published var segments: [TranscriptSegment] = [] { didSet { timeIndex = TranscriptTimeIndex(segments); subtitleCopyFeedback = nil } }
+    @Published var subtitleCopyFeedback: String?
+    private var loadedTrackID: String?
     private var timeIndex = TranscriptTimeIndex()
     @Published private(set) var activity: ProcessingActivity?
     @Published var condensed: [CitedText] = []
@@ -232,6 +234,7 @@ final class WorkspaceModel: ObservableObject {
             let info = try await BilibiliProbe.inspect(reference, cookieFile: BilibiliCookies.fileURL)
             try Task.checkCancellation()
             self.metadata = info
+            self.loadedTrackID = nil
             self.selectedTrackID = info.tracks.first?.id ?? ""
             self.videoFormatID = self.videoFormats.first(where: { $0.codecLabel == "H.264" && ($0.height ?? 0) <= 1080 })?.id ?? self.videoFormats.first?.id ?? ""
             self.audioFormatID = self.audioFormats.first?.id ?? ""
@@ -241,13 +244,33 @@ final class WorkspaceModel: ObservableObject {
             self.selectedTab = 0
         }
     }
-    func loadTrack() {
+    func loadTrack(copyAfterLoading: Bool = false) {
         guard let track = selectedTrack, let info = metadata, !isBusy else { return }
         start(status: "正在读取字幕…") {
             let segments = try await BilibiliProbe.load(track, referer: info.url)
             try Task.checkCancellation()
             self.show(segments: segments, title: info.title, source: track.label)
+            self.loadedTrackID = track.id
+            if copyAfterLoading { self.copyLoadedSubtitles() }
         }
+    }
+    var canCopyOriginalSubtitles: Bool {
+        !segments.isEmpty || (!isBusy && transcriptionMode == "auto" && selectedTrack != nil)
+    }
+    func copyOriginalSubtitles() {
+        if !isBusy, currentJob == nil, transcriptionMode == "auto", let track = selectedTrack,
+           loadedTrackID != track.id || segments.isEmpty {
+            loadTrack(copyAfterLoading: true)
+        } else { copyLoadedSubtitles() }
+    }
+    private func copyLoadedSubtitles() {
+        guard !segments.isEmpty else { return }
+        let content = TranscriptExport.srt(segments)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if pasteboard.setString(content, forType: .string) {
+            subtitleCopyFeedback = "已复制 \(segments.count) 段"
+        } else { error = "无法写入剪贴板，请重试。" }
     }
     func beginProcessing() {
         guard canStart else { return }
