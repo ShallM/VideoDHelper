@@ -221,6 +221,10 @@ struct WorkspacePage: View {
                     }.font(.caption).foregroundStyle(.secondary)
                 }
             }
+            Button { startOrManageASR(model.extractVideoSubtitles) } label: {
+                Label("仅提取原始字幕", systemImage: "captions.bubble").frame(maxWidth: .infinity)
+            }.disabled(!model.canExtractVideoSubtitles || otherIsBusy)
+                .help("优先读取平台字幕；缺少字幕或选择强制本地转录时，仅运行本地转录。不会调用大语言模型。")
             Button { startOrManageASR(model.beginProcessing) } label: {
                 Label(needsModelDownload ? "下载所选模型" : "生成学习笔记", systemImage: needsModelDownload ? "arrow.down.circle" : "sparkles").frame(maxWidth: .infinity).padding(.vertical, 4)
             }.buttonStyle(.borderedProminent).tint(.teal).disabled(!model.canStart || otherIsBusy)
@@ -392,7 +396,7 @@ struct WorkspacePage: View {
                     }.labelsHidden()
                 }
                 Toggle("完成后保留媒体文件", isOn: $model.keepMedia).font(.callout)
-                Text(model.keepMedia ? "媒体保存在本任务文件夹，可随时清理。" : "三份文字保存成功后清理媒体；失败或取消时保留进度。")
+                Text(model.keepMedia ? "媒体保存在本任务文件夹，可随时清理。" : "所选步骤的文字保存成功后清理媒体；失败或取消时保留进度。")
                     .font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.font(.callout).disabled(model.isBusy)

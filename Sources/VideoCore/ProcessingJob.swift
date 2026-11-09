@@ -153,6 +153,8 @@ public struct ProcessingRequest: Codable, Sendable {
     public var sourceKind: WorkspaceKind?
     public var localAudioFile: String?
     public var recordingAction: String?
+    /// Missing on existing video tasks preserves the complete transcription + summary pipeline.
+    public var videoAction: String?
     public var diarizationMode: String?
     /// Missing on older recordings: their original reader and checkpoints remain in use.
     public var dialogueStrategy: String?

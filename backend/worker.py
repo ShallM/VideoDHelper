@@ -66,6 +66,8 @@ def validate_request(request):
         raise UserError("任务的媒体选项无效。")
     if request.get("summaryStrategy", "legacy") not in ("legacy", "structured", "compact"):
         raise UserError("任务的总结方案无效。")
+    if request.get("videoAction", "summarize") not in ("transcribe", "summarize"):
+        raise UserError("视频处理步骤无效。")
     url = urllib.parse.urlsplit(request.get("url", ""))
     if request.get("useWhisper") or request["mediaMode"] != "needed":
         if url.scheme != "https" or url.hostname not in ("www.bilibili.com", "bilibili.com", "b23.tv") or url.username or url.password or url.port:
@@ -94,7 +96,8 @@ def run(folder, support, env_file=None):
             from recording import run_recording
             return run_recording(request, record, folder, support, emit, load_config, env_file)
         # Snapshot settings at the beginning. Editing settings affects the next run, not a running transcription.
-        config = load_config(support, env_file)
+        transcript_only = request.get("videoAction", "summarize") == "transcribe"
+        config = {} if transcript_only else load_config(support, env_file)
         config.update(taskID=record["id"], taskTitle=request["title"])
         # Old requests remain on the old engine. Changing the default never
         # silently switches an interrupted task; comparisons are separate jobs.
@@ -118,6 +121,24 @@ def run(folder, support, env_file=None):
             segments = request["segments"]
             save_transcript(folder, segments)
             emit("transcript", f"已保存 {len(segments)} 段来源字幕。")
+        if transcript_only:
+            warning = ""
+            if not request["keepMedia"]:
+                try:
+                    clean_media(folder)
+                    (folder / "media-manifest.json").unlink(missing_ok=True)
+                except OSError:
+                    warning = "媒体清理失败，可稍后手动清理。"
+            else:
+                (folder / "temporary" / "window.wav").unlink(missing_ok=True)
+            message = f"已提取 {len(segments)} 段原始字幕，可复制、导出或继续生成学习笔记。" + warning
+            record.update(state="transcribed", stage="transcribed", progress=1.0, updatedAt=time.time(),
+                          message=message, segmentCount=len(segments),
+                          mediaFiles=[str(p.relative_to(folder)) for p in (folder / "media").glob("source.*")
+                                      if p.is_file() and p.suffix not in (".part", ".ytdl")])
+            write_json(folder / "job.json", record)
+            print(__import__("json").dumps({"stage": "transcribed", "message": message, "progress": 1}, ensure_ascii=False), flush=True)
+            return 0
         notes, condensed = summarize(segments, request["title"], config, folder, emit)
         export_notes(folder, request["title"], request["source"], request.get("url", ""), segments, notes, condensed)
         # Only clean after ALL three text products have been atomically committed.

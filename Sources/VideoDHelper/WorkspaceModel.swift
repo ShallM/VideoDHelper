@@ -201,7 +201,8 @@ final class WorkspaceModel: ObservableObject {
         }
     }
     var audioFormats: [MediaFormat] { (metadata?.formats ?? []).filter { $0.hasAudio && !$0.hasVideo }.reversed() }
-    var canStart: Bool { !isBusy && (metadata != nil || (!segments.isEmpty && currentJob == nil)) }
+    var canStart: Bool { !isBusy && !currentJobIsArchived && (metadata != nil || (!segments.isEmpty && (currentJob == nil || currentJob?.state == "transcribed"))) }
+    var canExtractVideoSubtitles: Bool { !isBusy && currentJob == nil && (metadata != nil || !segments.isEmpty) }
     var currentJobIsArchived: Bool { currentJob.map { library.isArchived($0.id) } ?? false }
     var canResume: Bool { !isBusy && currentJob != nil && currentJob?.state != "completed" && currentJob?.state != "transcribed" && !currentJobIsArchived }
     var canChooseASRModel: Bool {
@@ -210,7 +211,7 @@ final class WorkspaceModel: ObservableObject {
     }
     var asrModelName: String { ASRModelStore.shared.name(whisperModel) }
     var requiresInstalledASR: Bool {
-        if let job = currentJob, metadata == nil,
+        if let job = currentJob,
            let request = try? AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json")) {
             return ASRTaskSelection.needsModel(for: request, directory: job.directory)
         }
@@ -273,6 +274,23 @@ final class WorkspaceModel: ObservableObject {
         } else { error = "无法写入剪贴板，请重试。" }
     }
     func beginProcessing() {
+        if let job = currentJob, job.state == "transcribed", !isBusy, !currentJobIsArchived {
+            start(status: "使用已保存的原始字幕生成学习笔记…") {
+                var request = try AppStorage.read(ProcessingRequest.self, from: job.directory.appendingPathComponent("request.json"))
+                request.videoAction = "summarize"
+                request.mediaMode = "needed"
+                try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
+                try await self.run(job)
+            }
+            return
+        }
+        beginVideoProcessing(transcriptOnly: false)
+    }
+    func extractVideoSubtitles() {
+        guard canExtractVideoSubtitles else { return }
+        beginVideoProcessing(transcriptOnly: true)
+    }
+    private func beginVideoProcessing(transcriptOnly: Bool) {
         guard canStart else { return }
         if collection == .archived { collection = .recent }
         if let info = metadata {
@@ -280,7 +298,7 @@ final class WorkspaceModel: ObservableObject {
                 error = "链接已修改，请先重新读取视频信息，避免处理上一个视频。"; return
             }
         }
-        start(status: "正在准备学习笔记任务…") {
+        start(status: transcriptOnly ? "正在准备原始字幕，不生成笔记…" : "正在准备学习笔记任务…") {
             try self.requireASRIfNeeded()
             let info = self.metadata
             let useWhisper = info != nil && (self.transcriptionMode == "whisper" || self.selectedTrack == nil)
@@ -297,6 +315,7 @@ final class WorkspaceModel: ObservableObject {
                 videoIncludesAudio: self.videoFormats.first(where: { $0.id == self.videoFormatID })?.hasAudio ?? false,
                 container: self.container, whisperModel: self.whisperModel, summaryStrategy: self.summaryStrategy)
             request.asrModelID = self.whisperModel
+            request.videoAction = transcriptOnly ? "transcribe" : "summarize"
             try AppStorage.write(request, to: job.directory.appendingPathComponent("request.json"))
             try AppStorage.write(job, to: job.directory.appendingPathComponent("job.json"))
             self.currentJob = job; self.source = source; self.notes = nil; self.condensed = []; self.historyQuery = ""
